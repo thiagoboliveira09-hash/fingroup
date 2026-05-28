@@ -1,0 +1,2078 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>FinGroup — Gestão Financeira</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#f9fafb;color:#111827}
+input,select,textarea,button{font-family:inherit;outline:none}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:#f1f1f1}
+::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const {useState,useEffect,useRef,useCallback}=React;
+
+// ── SUPABASE ──────────────────────────────────────────────────────────────
+const SB_URL="https://nikrcrxfjwelfxxglkai.supabase.co";
+const SB_KEY="sb_publishable_cVPmLWrcpzcmxOAsqY4aiw_uu8SbdAQ";
+const sb=supabase.createClient(SB_URL,SB_KEY);
+
+// ── CORES ─────────────────────────────────────────────────────────────────
+const C={
+  blue:"#2563eb",blueL:"#dbeafe",blueDk:"#1e40af",
+  green:"#16a34a",greenL:"#dcfce7",
+  red:"#dc2626",redL:"#fee2e2",
+  amber:"#d97706",amberL:"#fef3c7",
+  gray:"#6b7280",grayL:"#f3f4f6",
+  purple:"#7c3aed",purpleL:"#ede9fe",
+};
+
+// ── DB HELPERS ────────────────────────────────────────────────────────────
+const DB={
+  // Empresas
+  empresas:async()=>{const{data}=await sb.from("empresas").select("*").order("criado_em");return data||[]},
+  saveEmpresa:async(e)=>{
+    const p={nome:e.nome,cnpj:e.cnpj,cor:e.cor||C.blue,icon:e.icon||"🏢",segmento:e.segmento||"Comércio",regime:e.regime||"Simples Nacional",olist_token:e.olist_token||null};
+    if(e.id){const{data}=await sb.from("empresas").update(p).eq("id",e.id).select().single();return data;}
+    else{const{data}=await sb.from("empresas").insert(p).select().single();return data;}
+  },
+  delEmpresa:async(id)=>await sb.from("empresas").delete().eq("id",id),
+
+  // Contas a receber
+  receber:async(eid)=>{let q=sb.from("contas_receber").select("*").order("criado_em",{ascending:false});if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveReceber:async(c)=>{
+    const p={empresa_id:c.empresa_id,cliente:c.cliente,pedido:c.pedido||null,vencimento:c.vencimento||null,valor:Number(c.valor)||0,status:c.status||"Em aberto",origem:c.origem||"Manual",canal:c.canal||null};
+    if(c.id){const{data}=await sb.from("contas_receber").update(p).eq("id",c.id).select().single();return data;}
+    else{const{data}=await sb.from("contas_receber").insert(p).select().single();return data;}
+  },
+  delReceber:async(id)=>await sb.from("contas_receber").delete().eq("id",id),
+
+  // Contas a pagar
+  pagar:async(eid)=>{let q=sb.from("contas_pagar").select("*").order("criado_em",{ascending:false});if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  savePagar:async(c)=>{
+    const p={empresa_id:c.empresa_id,fornecedor:c.fornecedor,categoria:c.categoria||"Outros",vencimento:c.vencimento||null,valor:Number(c.valor)||0,status:c.status||"Em aberto",documento:c.documento||null,observacoes:c.observacoes||null};
+    if(c.id){const{data}=await sb.from("contas_pagar").update(p).eq("id",c.id).select().single();return data;}
+    else{const{data}=await sb.from("contas_pagar").insert(p).select().single();return data;}
+  },
+  delPagar:async(id)=>await sb.from("contas_pagar").delete().eq("id",id),
+
+  // Fluxo de caixa
+  fluxo:async(eid)=>{let q=sb.from("fluxo_caixa").select("*").order("data",{ascending:false});if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveFluxo:async(f)=>{
+    const p={empresa_id:f.empresa_id,data:f.data,descricao:f.descricao,categoria:f.categoria||null,tipo:f.tipo,valor:Number(f.valor)||0};
+    if(f.id){const{data}=await sb.from("fluxo_caixa").update(p).eq("id",f.id).select().single();return data;}
+    else{const{data}=await sb.from("fluxo_caixa").insert(p).select().single();return data;}
+  },
+  delFluxo:async(id)=>await sb.from("fluxo_caixa").delete().eq("id",id),
+
+  // Estoque
+  estoque:async(eid)=>{let q=sb.from("estoque").select("*").order("nome");if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveEstoque:async(e)=>{
+    const p={empresa_id:e.empresa_id,sku:e.sku||null,nome:e.nome,custo:Number(e.custo)||0,preco_venda:Number(e.preco_venda)||0,quantidade:Number(e.quantidade)||0,venda_dia:Number(e.venda_dia)||0,lead_time:Number(e.lead_time)||7,estoque_minimo:Number(e.estoque_minimo)||10,fornecedor:e.fornecedor||null};
+    if(e.id){const{data}=await sb.from("estoque").update(p).eq("id",e.id).select().single();return data;}
+    else{const{data}=await sb.from("estoque").insert(p).select().single();return data;}
+  },
+  delEstoque:async(id)=>await sb.from("estoque").delete().eq("id",id),
+
+  // Devoluções
+  devolucoes:async(eid)=>{let q=sb.from("devolucoes").select("*").order("criado_em",{ascending:false});if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveDevolvucao:async(d)=>{
+    const p={empresa_id:d.empresa_id,codigo:d.codigo||null,data:d.data||new Date().toISOString().slice(0,10),cliente:d.cliente,pedido:d.pedido||null,produto:d.produto,quantidade:Number(d.quantidade)||1,valor_venda:Number(d.valor_venda)||0,reembolso:Number(d.reembolso)||0,motivo:d.motivo||null,destino:d.destino||"Análise técnica",status:d.status||"Em análise",observacoes:d.observacoes||null,origem:d.origem||"Manual",ml_claim_id:d.ml_claim_id||null};
+    if(d.id){const{data}=await sb.from("devolucoes").update(p).eq("id",d.id).select().single();return data;}
+    else{const{data}=await sb.from("devolucoes").insert(p).select().single();return data;}
+  },
+  delDevolucao:async(id)=>await sb.from("devolucoes").delete().eq("id",id),
+
+  // Contatos
+  contatos:async(eid)=>{let q=sb.from("contatos").select("*").order("nome");if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveContato:async(c)=>{
+    const p={empresa_id:c.empresa_id,nome:c.nome,tipo:c.tipo||"Cliente",cnpj_cpf:c.cnpj_cpf||null,cidade:c.cidade||null,status:c.status||"Ativo"};
+    if(c.id){const{data}=await sb.from("contatos").update(p).eq("id",c.id).select().single();return data;}
+    else{const{data}=await sb.from("contatos").insert(p).select().single();return data;}
+  },
+  delContato:async(id)=>await sb.from("contatos").delete().eq("id",id),
+
+  // Usuários
+  loginUsuario:async(email,senha)=>{
+    const{data}=await sb.from("usuarios").select("*").eq("email",email.toLowerCase()).single();
+    if(!data)return{erro:"Usuário não encontrado"};
+    if(data.senha_hash!==btoa(senha+"_fg25"))return{erro:"Senha incorreta"};
+    return{usuario:data};
+  },
+  criarUsuario:async(nome,email,senha)=>{
+    const{data,error}=await sb.from("usuarios").insert({nome,email:email.toLowerCase(),senha_hash:btoa(senha+"_fg25"),papel:"usuario"}).select().single();
+    if(error)return{erro:error.message};
+    return{usuario:data};
+  },
+  usuarios:async()=>{const{data}=await sb.from("usuarios").select("id,nome,email,papel,criado_em").order("nome");return data||[]},
+  delUsuario:async(id)=>await sb.from("usuarios").delete().eq("id",id),
+};
+
+// ── HELPERS UI ────────────────────────────────────────────────────────────
+const fmtBRL=(v)=>"R$ "+(Number(v)||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtDate=(d)=>{if(!d)return"—";try{return new Date(d+"T00:00:00").toLocaleDateString("pt-BR")}catch{return d}};
+const toISO=(s)=>{if(!s||s==="—")return null;const p=s.split("/");if(p.length===3)return`${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;return s};
+
+function Spinner(){return<div style={{width:20,height:20,border:"3px solid #e5e7eb",borderTop:"3px solid "+C.blue,borderRadius:"50%",animation:"spin .7s linear infinite"}}/>}
+function Empty({msg="Nenhum registro encontrado."}){return<div style={{padding:40,textAlign:"center",color:"#9ca3af",fontSize:13}}>{msg}</div>}
+
+function Badge({children,type="blue"}){
+  const s={blue:{bg:C.blueL,c:C.blueDk},green:{bg:C.greenL,c:"#166534"},red:{bg:C.redL,c:"#991b1b"},amber:{bg:C.amberL,c:"#92400e"},purple:{bg:C.purpleL,c:"#5b21b6"},gray:{bg:C.grayL,c:"#374151"}}[type]||{bg:C.blueL,c:C.blueDk};
+  return<span style={{background:s.bg,color:s.c,fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:100}}>{children}</span>;
+}
+
+function KPI({label,value,sub,color}){
+  return(
+    <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"14px 16px"}}>
+      <div style={{fontSize:12,color:C.gray,fontWeight:500,marginBottom:4}}>{label}</div>
+      <div style={{fontSize:20,fontWeight:700,color:color||"#111827",letterSpacing:-0.5}}>{value}</div>
+      {sub&&<div style={{fontSize:11,color:C.gray,marginTop:2}}>{sub}</div>}
+    </div>
+  );
+}
+
+function Modal({title,onClose,children,width=520}){
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:24,width,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 25px 80px rgba(0,0,0,0.2)",animation:"fadeIn .25s ease"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
+          <div style={{fontSize:15,fontWeight:700,color:"#111827"}}>{title}</div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.gray,lineHeight:1}}>×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FormField({label,children}){
+  return<div><div style={{fontSize:11,color:C.gray,marginBottom:4,fontWeight:500}}>{label}</div>{children}</div>;
+}
+const inp={width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid #e5e7eb",fontSize:13,color:"#374151",background:"#fff",boxSizing:"border-box"};
+const btnP={padding:"9px 18px",borderRadius:9,background:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"};
+const btnS={padding:"9px 14px",borderRadius:9,border:"1px solid #e5e7eb",background:"#fff",fontSize:13,color:C.gray,cursor:"pointer"};
+
+// ── LOGIN ─────────────────────────────────────────────────────────────────
+function Login({onLogin}){
+  const[email,setEmail]=useState("");
+  const[senha,setSenha]=useState("");
+  const[nome,setNome]=useState("");
+  const[modo,setModo]=useState("check");
+  const[erro,setErro]=useState("");
+  const[loading,setLoading]=useState(false);
+
+  useEffect(()=>{
+    const s=localStorage.getItem("fg_user");
+    if(s){try{onLogin(JSON.parse(s))}catch{}}
+    DB.usuarios().then(u=>{setModo(u.length===0?"novo":"login")});
+  },[]);
+
+  const entrar=async()=>{
+    if(!email||!senha){setErro("Preencha todos os campos");return;}
+    setLoading(true);setErro("");
+    const r=await DB.loginUsuario(email,senha);
+    if(r.erro){setErro(r.erro);setLoading(false);return;}
+    localStorage.setItem("fg_user",JSON.stringify(r.usuario));
+    onLogin(r.usuario);
+  };
+
+  const criar=async()=>{
+    if(!nome||!email||!senha){setErro("Preencha todos os campos");return;}
+    if(senha.length<6){setErro("Senha mínima de 6 caracteres");return;}
+    setLoading(true);setErro("");
+    const r=await DB.criarUsuario(nome,email,senha);
+    if(r.erro){setErro("Email já cadastrado");setLoading(false);return;}
+    localStorage.setItem("fg_user",JSON.stringify(r.usuario));
+    onLogin(r.usuario);
+  };
+
+  if(modo==="check")return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#1e40af,#7c3aed)"}}>
+      <div style={{color:"#fff",fontSize:15}}>Conectando...</div>
+    </div>
+  );
+
+  const isNovo=modo==="novo"||modo==="cadastro";
+  return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#1e40af,#7c3aed)"}}>
+      <div style={{background:"#fff",borderRadius:20,padding:40,width:380,boxShadow:"0 25px 80px rgba(0,0,0,0.25)",animation:"fadeIn .4s ease"}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{fontSize:40,marginBottom:6}}>🏦</div>
+          <div style={{fontSize:22,fontWeight:700}}>FinGroup</div>
+          <div style={{fontSize:13,color:C.gray,marginTop:4}}>{isNovo?"Criar conta de acesso":"Acesse sua conta"}</div>
+          {modo==="novo"&&<div style={{marginTop:10,padding:"8px 12px",background:"#eff6ff",borderRadius:8,fontSize:12,color:C.blueDk}}>👋 Primeiro acesso — configure seu usuário.</div>}
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {isNovo&&<FormField label="Nome completo"><input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Seu nome" style={inp}/></FormField>}
+          <FormField label="E-mail"><input value={email} onChange={e=>setEmail(e.target.value)} type="email" placeholder="seu@email.com" style={inp} onKeyDown={e=>e.key==="Enter"&&(isNovo?criar():entrar())}/></FormField>
+          <FormField label="Senha"><input value={senha} onChange={e=>setSenha(e.target.value)} type="password" placeholder={isNovo?"Mínimo 6 caracteres":"Sua senha"} style={inp} onKeyDown={e=>e.key==="Enter"&&(isNovo?criar():entrar())}/></FormField>
+          {erro&&<div style={{fontSize:12,color:C.red,padding:"8px 12px",background:C.redL,borderRadius:8}}>⚠️ {erro}</div>}
+          <button onClick={isNovo?criar:entrar} disabled={loading} style={{...btnP,marginTop:4,opacity:loading?.6:1}}>
+            {loading?"Aguarde...":(isNovo?"✅ Criar conta e entrar":"🔐 Entrar")}
+          </button>
+          {modo!=="novo"&&(
+            <button onClick={()=>{setModo(modo==="login"?"cadastro":"login");setErro("");}} style={btnS}>
+              {modo==="login"?"Criar nova conta":"Já tenho conta — fazer login"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────────────────
+function Dashboard({empresaId,empresas}){
+  const[receber,setReceber]=useState([]);
+  const[pagar,setPagar]=useState([]);
+  const[fluxo,setFluxo]=useState([]);
+  const[estoque,setEstoque]=useState([]);
+  const[loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    Promise.all([
+      DB.receber(empresaId||null),
+      DB.pagar(empresaId||null),
+      DB.fluxo(empresaId||null),
+      DB.estoque(empresaId||null),
+    ]).then(([r,p,f,e])=>{setReceber(r);setPagar(p);setFluxo(f);setEstoque(e);setLoading(false);});
+  },[empresaId]);
+
+  if(loading)return<div style={{display:"flex",justifyContent:"center",padding:60}}><Spinner/></div>;
+
+  const totalReceber=receber.reduce((s,c)=>s+Number(c.valor||0),0);
+  const totalPagar=pagar.reduce((s,c)=>s+Number(c.valor||0),0);
+  const totalEntradas=fluxo.filter(f=>f.tipo==="entrada").reduce((s,f)=>s+Number(f.valor||0),0);
+  const totalSaidas=fluxo.filter(f=>f.tipo==="saida").reduce((s,f)=>s+Number(f.valor||0),0);
+  const saldo=totalEntradas-totalSaidas;
+  const atrasados=receber.filter(c=>c.status==="Atrasado");
+  const vencidos=pagar.filter(c=>c.status==="Atrasado");
+
+  // Capital de Giro
+  const valorEstoque=estoque.reduce((s,p)=>s+(Number(p.quantidade||0)*Number(p.custo||0)),0);
+  const receberAberto=receber.filter(c=>c.status==="Em aberto"||c.status==="Atrasado").reduce((s,c)=>s+Number(c.valor||0),0);
+  const pagarAberto=pagar.filter(c=>c.status==="Em aberto"||c.status==="Pendente"||c.status==="Atrasado").reduce((s,c)=>s+Number(c.valor||0),0);
+  const ncg=receberAberto+valorEstoque-pagarAberto;
+  const saldoTes=saldo-ncg;
+  const cgStatus=saldoTes>0?"ok":saldoTes>-5000?"atencao":"risco";
+  const cgColor={ok:C.green,atencao:C.amber,risco:C.red}[cgStatus];
+  const cgBg={ok:C.greenL,atencao:C.amberL,risco:C.redL}[cgStatus];
+  const cgLabel={ok:"✅ Saudável",atencao:"⚠️ Atenção",risco:"🚨 Risco"}[cgStatus];
+  const cgMsg={
+    ok:`Seu caixa cobre a NCG com folga de ${fmtBRL(Math.abs(saldoTes))}. Considere investir o excedente em CDB ou aplicação de curto prazo.`,
+    atencao:`Capital de giro apertado. Folga de apenas ${fmtBRL(Math.abs(saldoTes))}. Monitore de perto os recebimentos.`,
+    risco:`Déficit de ${fmtBRL(Math.abs(saldoTes))} no capital de giro. Antecipe recebíveis ou negocie prazo com fornecedores.`
+  }[cgStatus];
+  const coberturaP=ncg>0?Math.min(100,Math.round((saldo/ncg)*100)):100;
+
+  const isGrupo=!empresaId;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {isGrupo&&(
+        <div style={{background:"linear-gradient(135deg,#1e40af,#7c3aed)",borderRadius:14,padding:"18px 24px",color:"#fff"}}>
+          <div style={{fontSize:12,opacity:.8,marginBottom:6}}>🌐 Visão consolidada — {Object.keys(empresas).length} empresas</div>
+          <div style={{display:"flex",gap:32,flexWrap:"wrap"}}>
+            <div><div style={{fontSize:11,opacity:.7}}>A receber</div><div style={{fontSize:22,fontWeight:700}}>R$ {(totalReceber/1000).toFixed(0)}K</div></div>
+            <div><div style={{fontSize:11,opacity:.7}}>A pagar</div><div style={{fontSize:22,fontWeight:700}}>R$ {(totalPagar/1000).toFixed(0)}K</div></div>
+            <div><div style={{fontSize:11,opacity:.7}}>Saldo fluxo</div><div style={{fontSize:22,fontWeight:700}}>R$ {(saldo/1000).toFixed(0)}K</div></div>
+            <div><div style={{fontSize:11,opacity:.7}}>NCG</div><div style={{fontSize:22,fontWeight:700,color:cgColor==="#dc2626"?"#fca5a5":"#fff"}}>R$ {(ncg/1000).toFixed(0)}K</div></div>
+          </div>
+        </div>
+      )}
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        <KPI label="A receber" value={"R$ "+(totalReceber/1000).toFixed(1)+"K"} sub={receber.length+" registros"} color={C.blue}/>
+        <KPI label="A pagar" value={"R$ "+(totalPagar/1000).toFixed(1)+"K"} sub={pagar.length+" registros"} color={C.amber}/>
+        <KPI label="Saldo (fluxo)" value={"R$ "+(saldo/1000).toFixed(1)+"K"} sub="entradas - saídas" color={saldo>=0?C.green:C.red}/>
+        <KPI label="Recebíveis em atraso" value={atrasados.length} sub={atrasados.length>0?"⚠️ requer atenção":"✅ em dia"} color={atrasados.length>0?C.red:C.green}/>
+      </div>
+
+      {/* CAPITAL DE GIRO */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#374151"}}>💰 Capital de Giro</div>
+              <div style={{fontSize:11,color:"#9ca3af",marginTop:1}}>Necessidade × Disponibilidade</div>
+            </div>
+            <span style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:100,background:cgBg,color:cgColor}}>{cgLabel}</span>
+          </div>
+
+          {/* NCG principal */}
+          <div style={{background:"#f9fafb",borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+            <div style={{fontSize:11,color:C.gray,marginBottom:2}}>Necessidade de Capital de Giro (NCG)</div>
+            <div style={{fontSize:26,fontWeight:700,color:"#111827",letterSpacing:-1}}>{fmtBRL(ncg)}</div>
+            <div style={{fontSize:11,color:C.gray,marginTop:2}}>= Recebíveis + Estoques − Fornecedores</div>
+          </div>
+
+          {/* Breakdown */}
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+            {[
+              {label:"Recebíveis em aberto",value:receberAberto,color:C.blue,pos:true},
+              {label:"Valor em estoque",value:valorEstoque,color:C.purple,pos:true},
+              {label:"Fornecedores a pagar",value:pagarAberto,color:C.red,pos:false},
+            ].map((it,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{width:8,height:8,borderRadius:2,background:it.color,flexShrink:0}}/>
+                  <span style={{color:C.gray}}>{it.label}</span>
+                </div>
+                <span style={{fontWeight:600,color:it.pos?"#374151":C.red}}>
+                  {it.pos?"+":"-"}{fmtBRL(it.value)}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Barra cobertura */}
+          <div style={{marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.gray,marginBottom:4}}>
+              <span>Cobertura do caixa</span>
+              <span style={{fontWeight:600,color:cgColor}}>{coberturaP}%</span>
+            </div>
+            <div style={{background:"#f3f4f6",borderRadius:100,height:8,overflow:"hidden"}}>
+              <div style={{height:"100%",width:`${coberturaP}%`,background:cgColor,borderRadius:100,transition:"width .4s"}}/>
+            </div>
+          </div>
+
+          {/* Saldo tesouraria */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+            <div style={{background:saldoTes>=0?C.greenL:C.redL,borderRadius:8,padding:"8px 10px"}}>
+              <div style={{fontSize:10,color:C.gray}}>Saldo de tesouraria</div>
+              <div style={{fontSize:14,fontWeight:700,color:saldoTes>=0?C.green:C.red}}>
+                {saldoTes>=0?"+":""}{fmtBRL(saldoTes)}
+              </div>
+            </div>
+            <div style={{background:"#eff6ff",borderRadius:8,padding:"8px 10px"}}>
+              <div style={{fontSize:10,color:C.gray}}>Ciclo financeiro</div>
+              <div style={{fontSize:14,fontWeight:700,color:C.blue}}>
+                {totalSaidas>0?Math.round((ncg/Math.max(totalSaidas,1))*30)+"d":"—"}
+              </div>
+            </div>
+          </div>
+
+          {/* Recomendação IA */}
+          <div style={{padding:"8px 10px",background:cgBg,borderRadius:8,borderLeft:`3px solid ${cgColor}`}}>
+            <div style={{fontSize:11,color:cgColor,lineHeight:1.5}}>
+              💡 <strong>Recomendação:</strong> {cgMsg}
+            </div>
+          </div>
+        </div>
+
+        {/* Resumo financeiro */}
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16,flex:1}}>
+            <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>📋 Últimas contas a receber</div>
+            {receber.length===0?<Empty msg="Nenhuma conta cadastrada"/>:(
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead><tr>{["Cliente","Valor","Status"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"5px 8px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11}}>{h}</th>)}</tr></thead>
+                <tbody>{receber.slice(0,5).map((c,i)=>(
+                  <tr key={i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                    <td style={{padding:"6px 8px",fontWeight:500,color:"#374151",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.cliente}</td>
+                    <td style={{padding:"6px 8px",fontWeight:600,color:C.blue}}>{fmtBRL(c.valor)}</td>
+                    <td style={{padding:"6px 8px"}}><Badge type={{Atrasado:"red","Em aberto":"blue",Recebido:"green"}[c.status]||"gray"}>{c.status}</Badge></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+          </div>
+
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16,flex:1}}>
+            <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>💸 Últimas movimentações</div>
+            {fluxo.length===0?<Empty msg="Nenhuma movimentação cadastrada"/>:(
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead><tr>{["Descrição","Tipo","Valor"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"5px 8px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11}}>{h}</th>)}</tr></thead>
+                <tbody>{fluxo.slice(0,5).map((f,i)=>(
+                  <tr key={i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                    <td style={{padding:"6px 8px",color:"#374151",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.descricao}</td>
+                    <td style={{padding:"6px 8px"}}><Badge type={f.tipo==="entrada"?"green":"red"}>{f.tipo}</Badge></td>
+                    <td style={{padding:"6px 8px",fontWeight:600,color:f.tipo==="entrada"?C.green:C.red}}>{f.tipo==="entrada"?"+":"-"}{fmtBRL(f.valor)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {vencidos.length>0&&(
+        <div style={{background:C.redL,border:"1px solid #fca5a5",borderRadius:12,padding:14,display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:20}}>⚠️</span>
+          <div>
+            <div style={{fontSize:13,fontWeight:600,color:"#991b1b"}}>Contas a pagar vencidas</div>
+            <div style={{fontSize:12,color:C.red}}>{vencidos.length} conta{vencidos.length>1?"s":""} em atraso · Total: {fmtBRL(vencidos.reduce((s,c)=>s+Number(c.valor||0),0))}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── CONTAS A RECEBER ──────────────────────────────────────────────────────
+function ContasReceberPanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[busca,setBusca]=useState("");
+  const[filtro,setFiltro]=useState("todos");
+  const STATUS=["Em aberto","Recebido","Atrasado","Cancelado"];
+  const statusBadge={Atrasado:"red","Em aberto":"blue",Recebido:"green",Cancelado:"gray"};
+  const FORM0={empresa_id:empresaId,cliente:"",pedido:"",vencimento:"",valor:"",status:"Em aberto",origem:"Manual"};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.receber(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId,vencimento:item.vencimento||""}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.cliente||!form.valor){alert("Preencha cliente e valor");return;}
+    await DB.saveReceber({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delReceber(confirmDel);setConfirmDel(null);carregar();};
+
+  const vis=dados.filter(c=>(filtro==="todos"||c.status===filtro)&&(busca===""||c.cliente.toLowerCase().includes(busca.toLowerCase())));
+  const total=vis.reduce((s,c)=>s+Number(c.valor||0),0);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        <KPI label="Total a receber" value={"R$ "+(dados.reduce((s,c)=>s+Number(c.valor||0),0)/1000).toFixed(1)+"K"} sub={dados.length+" registros"}/>
+        <KPI label="Em aberto" value={dados.filter(c=>c.status==="Em aberto").length} sub="aguardando"/>
+        <KPI label="Recebidos" value={dados.filter(c=>c.status==="Recebido").length} sub="confirmados" color={C.green}/>
+        <KPI label="Atrasados" value={dados.filter(c=>c.status==="Atrasado").length} sub="requer atenção" color={C.red}/>
+      </div>
+
+      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+        <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar cliente..." style={{flex:1,...inp}}/>
+        {["todos","Em aberto","Recebido","Atrasado"].map(f=>(
+          <button key={f} onClick={()=>setFiltro(f)} style={{padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",background:filtro===f?C.blue:"#f3f4f6",color:filtro===f?"#fff":C.gray}}>
+            {f==="todos"?"Todos":f}
+          </button>
+        ))}
+        {!(!empresaId)&&<button onClick={()=>abrir()} style={{...btnP,whiteSpace:"nowrap"}}>+ Novo</button>}
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+        {loading?<div style={{padding:40,textAlign:"center"}}><Spinner/></div>:vis.length===0?<Empty/>:(
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead><tr style={{background:"#f9fafb"}}>{["Cliente","Pedido","Vencimento","Valor","Origem","Status","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:12}}>{h}</th>)}</tr></thead>
+            <tbody>{vis.map((c,i)=>(
+              <tr key={c.id||i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                <td style={{padding:"9px 12px",fontWeight:500,color:"#111827"}}>{c.cliente}</td>
+                <td style={{padding:"9px 12px",color:C.gray,fontSize:12}}>{c.pedido||"—"}</td>
+                <td style={{padding:"9px 12px",color:C.gray}}>{fmtDate(c.vencimento)}</td>
+                <td style={{padding:"9px 12px",fontWeight:600,color:C.blue}}>{fmtBRL(c.valor)}</td>
+                <td style={{padding:"9px 12px"}}><span style={{fontSize:10,padding:"2px 7px",borderRadius:100,background:"#f3f4f6",color:C.gray}}>{c.origem||"Manual"}</span></td>
+                <td style={{padding:"9px 12px"}}><Badge type={statusBadge[c.status]||"gray"}>{c.status}</Badge></td>
+                <td style={{padding:"9px 12px"}}>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>abrir(c)} style={{padding:"3px 9px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}}>✏️</button>
+                    <button onClick={()=>setConfirmDel(c.id)} style={{padding:"3px 9px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}}>🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+        <div style={{padding:"10px 16px",borderTop:"1px solid #e5e7eb",background:"#f9fafb",fontSize:12,color:C.gray}}>
+          {vis.length} registros · Total filtrado: <strong style={{color:"#374151"}}>{fmtBRL(total)}</strong>
+        </div>
+      </div>
+
+      {showForm&&(
+        <Modal title={editItem?"✏️ Editar conta a receber":"+ Nova conta a receber"} onClose={()=>setShowForm(false)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+            <FormField label="Cliente *"><input value={form.cliente} onChange={e=>setForm(f=>({...f,cliente:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Pedido / NF"><input value={form.pedido||""} onChange={e=>setForm(f=>({...f,pedido:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Valor (R$) *"><input type="number" value={form.valor} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Vencimento"><input type="date" value={form.vencimento||""} onChange={e=>setForm(f=>({...f,vencimento:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Status"><select value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))} style={inp}>{STATUS.map(s=><option key={s}>{s}</option>)}</select></FormField>
+            <FormField label="Origem"><input value={form.origem||"Manual"} onChange={e=>setForm(f=>({...f,origem:e.target.value}))} style={inp}/></FormField>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowForm(false)} style={btnS}>Cancelar</button>
+            <button onClick={salvar} style={btnP}>💾 Salvar</button>
+          </div>
+        </Modal>
+      )}
+      {confirmDel&&(
+        <Modal title="🗑️ Excluir registro?" onClose={()=>setConfirmDel(null)} width={360}>
+          <div style={{fontSize:13,color:C.gray,marginBottom:20}}>Esta ação não pode ser desfeita.</div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setConfirmDel(null)} style={btnS}>Cancelar</button>
+            <button onClick={excluir} style={{...btnP,background:C.red}}>Excluir</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── CONTAS A PAGAR ────────────────────────────────────────────────────────
+function ContasPagarPanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[busca,setBusca]=useState("");
+  const[filtro,setFiltro]=useState("todos");
+  const[showImport,setShowImport]=useState(false);
+  const[importTab,setImportTab]=useState("foto"); // foto | pdf | xml
+  const STATUS=["Em aberto","Pago","Pendente","Atrasado"];
+  const CATS=["Fornecedores","Serviços","Energia","Aluguel","Impostos","Folha","Outros"];
+  const statusBadge={Atrasado:"red","Em aberto":"blue",Pago:"green",Pendente:"amber"};
+  const FORM0={empresa_id:empresaId,fornecedor:"",categoria:"Outros",vencimento:"",valor:"",status:"Em aberto",documento:"",observacoes:""};
+  const[form,setForm]=useState(FORM0);
+
+  // Foto/PDF states
+  const[fileStage,setFileStage]=useState("idle");
+  const[fileSrc,setFileSrc]=useState(null);
+  const[fileB64,setFileB64]=useState(null);
+  const[fileMime,setFileMime]=useState("image/jpeg");
+  const[fileData,setFileData]=useState(null);
+  const[fileErr,setFileErr]=useState("");
+  const fotoRef=useRef(null);
+  const pdfRef=useRef(null);
+  const xmlRef=useRef(null);
+
+  // XML states
+  const[xmlData,setXmlData]=useState(null);
+  const[xmlErr,setXmlErr]=useState("");
+
+  const carregar=async()=>{setLoading(true);const d=await DB.pagar(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.fornecedor||!form.valor){alert("Preencha fornecedor e valor");return;}
+    await DB.savePagar({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delPagar(confirmDel);setConfirmDel(null);carregar();};
+
+  // ── FOTO / PDF handler
+  const handleFile=(file,tipo)=>{
+    if(!file)return;
+    setFileErr("");
+    const r=new FileReader();
+    r.onload=(e)=>{
+      const b64=e.target.result.split(",")[1];
+      setFileB64(b64);
+      setFileMime(file.type||"image/jpeg");
+      if(tipo==="foto"||tipo==="pdf"){
+        setFileSrc(e.target.result);
+        setFileStage("preview");
+      }
+    };
+    r.readAsDataURL(file);
+  };
+
+  const analisarArquivo=async()=>{
+    setFileStage("reading");setFileErr("");
+    try{
+      const isImg=fileMime.startsWith("image");
+      const contentArr=isImg
+        ?[{type:"image",source:{type:"base64",media_type:fileMime,data:fileB64}},{type:"text",text:'Extraia dados deste documento fiscal. Responda APENAS JSON sem markdown: {"fornecedor":"","cnpj_fornecedor":"","valor":0,"vencimento":"DD/MM/AAAA","categoria":"Fornecedores|Serviços|Energia|Aluguel|Impostos|Folha|Outros","documento":"","chave_nfe":"","observacoes":""}'}]
+        :[{type:"document",source:{type:"base64",media_type:"application/pdf",data:fileB64}},{type:"text",text:'Extraia dados deste documento fiscal (boleto, NF ou fatura). Responda APENAS JSON sem markdown: {"fornecedor":"","cnpj_fornecedor":"","valor":0,"vencimento":"DD/MM/AAAA","categoria":"Fornecedores|Serviços|Energia|Aluguel|Impostos|Folha|Outros","documento":"","observacoes":""}'}];
+
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        model:"claude-sonnet-4-20250514",max_tokens:600,
+        messages:[{role:"user",content:contentArr}]
+      })});
+      const d=await res.json();
+      const txt=d.content?.[0]?.text||"{}";
+      const parsed=JSON.parse(txt.replace(/```json|```/g,"").trim());
+      setFileData(parsed);setFileStage("review");
+    }catch(e){setFileErr("Erro ao analisar: "+e.message);setFileStage("preview");}
+  };
+
+  const confirmarArquivo=async()=>{
+    const venc=fileData.vencimento?toISO(fileData.vencimento):null;
+    await DB.savePagar({empresa_id:empresaId,fornecedor:fileData.fornecedor||"Importado",categoria:fileData.categoria||"Outros",vencimento:venc,valor:fileData.valor||0,status:"Em aberto",documento:fileData.documento||fileData.chave_nfe||"",observacoes:(fileData.observacoes||"")+(fileData.cnpj_fornecedor?" | CNPJ: "+fileData.cnpj_fornecedor:"")});
+    resetImport();carregar();
+  };
+
+  const resetImport=()=>{setFileStage("idle");setFileSrc(null);setFileB64(null);setFileData(null);setFileErr("");setXmlData(null);setXmlErr("");};
+
+  // ── XML NF-e parser
+  const handleXML=(file)=>{
+    if(!file)return;
+    setXmlErr("");setXmlData(null);
+    const r=new FileReader();
+    r.onload=(e)=>{
+      try{
+        const txt=e.target.result;
+        const parser=new DOMParser();
+        const xml=parser.parseFromString(txt,"text/xml");
+        const get=(tag)=>xml.getElementsByTagName(tag)[0]?.textContent||"";
+
+        // Extrai dados da NF-e
+        const emit=xml.getElementsByTagName("emit")[0];
+        const fornecedor=emit?.getElementsByTagName("xNome")[0]?.textContent||get("xNome")||"Fornecedor";
+        const cnpj=emit?.getElementsByTagName("CNPJ")[0]?.textContent||get("CNPJ")||"";
+        const valorTotal=get("vNF")||get("vProd")||"0";
+        const numNF=get("nNF")||"";
+        const chaveNFe=get("chNFe")||"";
+        const dtEmissao=get("dhEmi")||get("dEmi")||"";
+        const natOp=get("natOp")||"";
+
+        // Tenta extrair vencimento (duplicata)
+        const dup=xml.getElementsByTagName("dup")[0];
+        const dtVenc=dup?.getElementsByTagName("dVenc")[0]?.textContent||"";
+
+        // Formata data para DD/MM/AAAA
+        const fmtXMLDate=(d)=>{
+          if(!d)return"";
+          const clean=d.slice(0,10);
+          const parts=clean.split("-");
+          if(parts.length===3)return parts[2]+"/"+parts[1]+"/"+parts[0];
+          return d;
+        };
+
+        const parsed={
+          fornecedor,cnpj_fornecedor:cnpj,
+          valor:parseFloat(valorTotal)||0,
+          vencimento:fmtXMLDate(dtVenc)||fmtXMLDate(dtEmissao),
+          categoria:"Fornecedores",
+          documento:"NF "+numNF,
+          chave_nfe:chaveNFe,
+          natureza:natOp,
+          observacoes:natOp?"Natureza: "+natOp:"",
+        };
+        setXmlData(parsed);
+      }catch(err){setXmlErr("Erro ao ler XML: "+err.message);}
+    };
+    r.readAsText(file);
+  };
+
+  const confirmarXML=async()=>{
+    const venc=xmlData.vencimento?toISO(xmlData.vencimento):null;
+    await DB.savePagar({empresa_id:empresaId,fornecedor:xmlData.fornecedor,categoria:xmlData.categoria,vencimento:venc,valor:xmlData.valor,status:"Em aberto",documento:xmlData.documento,observacoes:(xmlData.observacoes||"")+(xmlData.cnpj_fornecedor?" | CNPJ: "+xmlData.cnpj_fornecedor:"")+(xmlData.chave_nfe?" | Chave: "+xmlData.chave_nfe.slice(0,20)+"...":"")});
+    resetImport();carregar();
+  };
+
+  const vis=dados.filter(c=>(filtro==="todos"||c.status===filtro)&&(busca===""||c.fornecedor.toLowerCase().includes(busca.toLowerCase())));
+  const total=vis.reduce((s,c)=>s+Number(c.valor||0),0);
+
+  const IMPORT_TABS=[
+    {id:"foto",label:"📷 Foto",desc:"Boleto ou NF por câmera"},
+    {id:"pdf",label:"📄 PDF",desc:"Fatura ou boleto em PDF"},
+    {id:"xml",label:"📋 XML",desc:"Nota Fiscal eletrônica"},
+  ];
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        <KPI label="Total a pagar" value={"R$ "+(dados.reduce((s,c)=>s+Number(c.valor||0),0)/1000).toFixed(1)+"K"} sub={dados.length+" registros"}/>
+        <KPI label="Em aberto" value={dados.filter(c=>c.status==="Em aberto").length}/>
+        <KPI label="Pagos" value={dados.filter(c=>c.status==="Pago").length} color={C.green}/>
+        <KPI label="Atrasados" value={dados.filter(c=>c.status==="Atrasado").length} color={C.red}/>
+      </div>
+
+      {/* IMPORTAR DOCUMENTO */}
+      <div style={{background:"#fff",border:`1px solid ${showImport?C.blue:"#e5e7eb"}`,borderRadius:12,padding:16,transition:"border-color .2s"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:600}}>📑 Lançar por documento</div>
+            <div style={{fontSize:11,color:C.gray}}>Foto · PDF · XML NF-e — IA extrai os dados automaticamente</div>
+          </div>
+          <button onClick={()=>{setShowImport(v=>!v);resetImport();}} style={{...btnP,fontSize:12}}>{showImport?"Fechar":"+ Importar documento"}</button>
+        </div>
+
+        {showImport&&(
+          <div style={{marginTop:16}}>
+            {/* Tabs */}
+            <div style={{display:"flex",gap:8,marginBottom:16}}>
+              {IMPORT_TABS.map(t=>(
+                <button key={t.id} onClick={()=>{setImportTab(t.id);resetImport();}} style={{flex:1,padding:"10px 12px",borderRadius:10,border:`1.5px solid ${importTab===t.id?C.blue:"#e5e7eb"}`,background:importTab===t.id?"#eff6ff":"#fff",cursor:"pointer",textAlign:"center"}}>
+                  <div style={{fontSize:14,marginBottom:2}}>{t.label}</div>
+                  <div style={{fontSize:11,color:C.gray}}>{t.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            {/* FOTO */}
+            {importTab==="foto"&&(
+              <div>
+                {fileStage==="idle"&&(
+                  <div onClick={()=>fotoRef.current?.click()} style={{border:"2px dashed #d1d5db",borderRadius:10,padding:28,textAlign:"center",cursor:"pointer",background:"#fafafa"}}>
+                    <input ref={fotoRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0],"foto")}/>
+                    <div style={{fontSize:32,marginBottom:8}}>📷</div>
+                    <div style={{fontSize:13,fontWeight:500,color:"#374151"}}>Clique para tirar foto ou selecionar imagem</div>
+                    <div style={{fontSize:11,color:C.gray,marginTop:4}}>Boleto, NF, fatura — JPG ou PNG</div>
+                  </div>
+                )}
+                {fileStage==="preview"&&fileSrc&&(
+                  <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
+                    <img src={fileSrc} style={{width:160,maxHeight:200,objectFit:"contain",borderRadius:8,border:"1px solid #e5e7eb"}}/>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,color:"#374151",marginBottom:12}}>Imagem carregada. A IA vai extrair os dados do documento.</div>
+                      {fileErr&&<div style={{fontSize:12,color:C.red,marginBottom:8}}>⚠️ {fileErr}</div>}
+                      <div style={{display:"flex",gap:8}}>
+                        <button onClick={analisarArquivo} style={btnP}>🤖 Analisar com IA</button>
+                        <button onClick={resetImport} style={btnS}>Cancelar</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {fileStage==="reading"&&<div style={{padding:24,textAlign:"center",color:C.gray}}>🔍 Lendo documento com IA...</div>}
+                {fileStage==="review"&&fileData&&<FileReviewCard data={fileData} onConfirm={confirmarArquivo} onBack={()=>setFileStage("preview")}/>}
+              </div>
+            )}
+
+            {/* PDF */}
+            {importTab==="pdf"&&(
+              <div>
+                {fileStage==="idle"&&(
+                  <div onClick={()=>pdfRef.current?.click()} style={{border:"2px dashed #d1d5db",borderRadius:10,padding:28,textAlign:"center",cursor:"pointer",background:"#fafafa"}}>
+                    <input ref={pdfRef} type="file" accept="application/pdf" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0],"pdf")}/>
+                    <div style={{fontSize:32,marginBottom:8}}>📄</div>
+                    <div style={{fontSize:13,fontWeight:500,color:"#374151"}}>Clique para selecionar o PDF</div>
+                    <div style={{fontSize:11,color:C.gray,marginTop:4}}>Boleto, fatura, NF em PDF — a IA lê o conteúdo</div>
+                  </div>
+                )}
+                {fileStage==="preview"&&(
+                  <div style={{padding:16,background:"#f9fafb",borderRadius:10,display:"flex",alignItems:"center",gap:12}}>
+                    <span style={{fontSize:32}}>📄</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:500,color:"#374151"}}>PDF carregado</div>
+                      <div style={{fontSize:12,color:C.gray}}>A IA vai ler e extrair fornecedor, valor e vencimento</div>
+                    </div>
+                    {fileErr&&<div style={{fontSize:12,color:C.red}}>⚠️ {fileErr}</div>}
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={analisarArquivo} style={btnP}>🤖 Analisar com IA</button>
+                      <button onClick={resetImport} style={btnS}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+                {fileStage==="reading"&&<div style={{padding:24,textAlign:"center",color:C.gray}}>🔍 Lendo PDF com IA...</div>}
+                {fileStage==="review"&&fileData&&<FileReviewCard data={fileData} onConfirm={confirmarArquivo} onBack={()=>setFileStage("preview")}/>}
+              </div>
+            )}
+
+            {/* XML NF-e */}
+            {importTab==="xml"&&(
+              <div>
+                {!xmlData&&(
+                  <div>
+                    <div onClick={()=>xmlRef.current?.click()} style={{border:"2px dashed #d1d5db",borderRadius:10,padding:28,textAlign:"center",cursor:"pointer",background:"#fafafa"}}>
+                      <input ref={xmlRef} type="file" accept=".xml,text/xml" style={{display:"none"}} onChange={e=>handleXML(e.target.files[0])}/>
+                      <div style={{fontSize:32,marginBottom:8}}>📋</div>
+                      <div style={{fontSize:13,fontWeight:500,color:"#374151"}}>Clique para selecionar o XML da NF-e</div>
+                      <div style={{fontSize:11,color:C.gray,marginTop:4}}>Arquivo .xml da Nota Fiscal Eletrônica</div>
+                    </div>
+                    {xmlErr&&<div style={{marginTop:10,fontSize:12,color:C.red,padding:"8px 12px",background:C.redL,borderRadius:8}}>⚠️ {xmlErr}</div>}
+                    <div style={{marginTop:12,padding:"10px 14px",background:"#eff6ff",borderRadius:8,fontSize:12,color:C.blueDk}}>
+                      💡 O XML é lido localmente no navegador — nenhum dado é enviado para servidores externos. Extrai automaticamente: emitente, CNPJ, valor total, número da NF e vencimento das duplicatas.
+                    </div>
+                  </div>
+                )}
+                {xmlData&&(
+                  <div>
+                    <div style={{fontSize:13,fontWeight:600,color:"#374151",marginBottom:12}}>✅ XML lido — confirme os dados:</div>
+                    <FileReviewCard data={xmlData} onConfirm={confirmarXML} onBack={()=>setXmlData(null)} extra={[
+                      xmlData.chave_nfe&&["Chave NF-e",xmlData.chave_nfe.slice(0,20)+"..."],
+                      xmlData.natureza&&["Natureza op.",xmlData.natureza],
+                    ].filter(Boolean)}/>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+        <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar fornecedor..." style={{flex:1,...inp}}/>
+        {["todos","Em aberto","Atrasado","Pago"].map(f=>(
+          <button key={f} onClick={()=>setFiltro(f)} style={{padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",background:filtro===f?C.blue:"#f3f4f6",color:filtro===f?"#fff":C.gray}}>
+            {f==="todos"?"Todos":f}
+          </button>
+        ))}
+        {!(!empresaId)&&<button onClick={()=>abrir()} style={{...btnP,whiteSpace:"nowrap"}}>+ Manual</button>}
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+        {loading?<div style={{padding:40,textAlign:"center"}}><Spinner/></div>:vis.length===0?<Empty/>:(
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead><tr style={{background:"#f9fafb"}}>{["Fornecedor","Categoria","Documento","Vencimento","Valor","Status","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:12}}>{h}</th>)}</tr></thead>
+            <tbody>{vis.map((c,i)=>(
+              <tr key={c.id||i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                <td style={{padding:"9px 12px",fontWeight:500,color:"#111827"}}>{c.fornecedor}</td>
+                <td style={{padding:"9px 12px",color:C.gray}}>{c.categoria}</td>
+                <td style={{padding:"9px 12px",color:C.gray,fontSize:11}}>{c.documento||"—"}</td>
+                <td style={{padding:"9px 12px",color:C.gray}}>{fmtDate(c.vencimento)}</td>
+                <td style={{padding:"9px 12px",fontWeight:600,color:C.red}}>{fmtBRL(c.valor)}</td>
+                <td style={{padding:"9px 12px"}}><Badge type={statusBadge[c.status]||"gray"}>{c.status}</Badge></td>
+                <td style={{padding:"9px 12px"}}>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>abrir(c)} style={{padding:"3px 9px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}}>✏️</button>
+                    <button onClick={()=>setConfirmDel(c.id)} style={{padding:"3px 9px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}}>🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+        <div style={{padding:"10px 16px",borderTop:"1px solid #e5e7eb",background:"#f9fafb",fontSize:12,color:C.gray}}>
+          {vis.length} registros · Total: <strong style={{color:"#374151"}}>{fmtBRL(total)}</strong>
+        </div>
+      </div>
+
+      {showForm&&(
+        <Modal title={editItem?"✏️ Editar conta a pagar":"+ Nova conta a pagar"} onClose={()=>setShowForm(false)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+            <div style={{gridColumn:"1/-1"}}><FormField label="Fornecedor *"><input value={form.fornecedor} onChange={e=>setForm(f=>({...f,fornecedor:e.target.value}))} style={inp}/></FormField></div>
+            <FormField label="Categoria"><select value={form.categoria} onChange={e=>setForm(f=>({...f,categoria:e.target.value}))} style={inp}>{CATS.map(c=><option key={c}>{c}</option>)}</select></FormField>
+            <FormField label="Valor (R$) *"><input type="number" value={form.valor} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Vencimento"><input type="date" value={form.vencimento||""} onChange={e=>setForm(f=>({...f,vencimento:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Status"><select value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))} style={inp}>{STATUS.map(s=><option key={s}>{s}</option>)}</select></FormField>
+            <FormField label="Documento / NF"><input value={form.documento||""} onChange={e=>setForm(f=>({...f,documento:e.target.value}))} style={inp}/></FormField>
+            <div style={{gridColumn:"1/-1"}}><FormField label="Observações"><textarea value={form.observacoes||""} onChange={e=>setForm(f=>({...f,observacoes:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/></FormField></div>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowForm(false)} style={btnS}>Cancelar</button>
+            <button onClick={salvar} style={btnP}>💾 Salvar</button>
+          </div>
+        </Modal>
+      )}
+      {confirmDel&&(
+        <Modal title="🗑️ Excluir?" onClose={()=>setConfirmDel(null)} width={360}>
+          <div style={{fontSize:13,color:C.gray,marginBottom:20}}>Esta ação não pode ser desfeita.</div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setConfirmDel(null)} style={btnS}>Cancelar</button>
+            <button onClick={excluir} style={{...btnP,background:C.red}}>Excluir</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// Card de revisão compartilhado (foto/pdf/xml)
+function FileReviewCard({data,onConfirm,onBack,extra=[]}){
+  return(
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+        {[
+          ["Fornecedor",data.fornecedor],
+          ["CNPJ",data.cnpj_fornecedor],
+          ["Valor","R$ "+Number(data.valor||0).toLocaleString("pt-BR",{minimumFractionDigits:2})],
+          ["Vencimento",data.vencimento],
+          ["Categoria",data.categoria],
+          ["Documento",data.documento],
+          ...extra,
+        ].filter(([,v])=>v).map(([l,v])=>(
+          <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"8px 12px"}}>
+            <div style={{fontSize:10,color:C.gray,marginBottom:2}}>{l}</div>
+            <div style={{fontSize:13,fontWeight:500,color:"#111827"}}>{v||"—"}</div>
+          </div>
+        ))}
+      </div>
+      {data.observacoes&&<div style={{fontSize:12,color:C.gray,padding:"8px 10px",background:"#fef9ec",borderRadius:8,marginBottom:12,borderLeft:"3px solid "+C.amber}}>{data.observacoes}</div>}
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={onConfirm} style={{...btnP,background:C.green}}>✅ Confirmar lançamento</button>
+        <button onClick={onBack} style={btnS}>← Reanalisar</button>
+      </div>
+    </div>
+  );
+}
+
+// ── FLUXO DE CAIXA ────────────────────────────────────────────────────────
+function FluxoPanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[busca,setBusca]=useState("");
+  const[filtro,setFiltro]=useState("todos");
+  const CATS=["Vendas","Serviços","Compras","Folha","Aluguel","Impostos","Financeiro","Outros"];
+  const FORM0={empresa_id:empresaId,data:new Date().toISOString().slice(0,10),descricao:"",categoria:"Outros",tipo:"entrada",valor:""};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.fluxo(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.descricao||!form.valor){alert("Preencha descrição e valor");return;}
+    await DB.saveFluxo({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delFluxo(confirmDel);setConfirmDel(null);carregar();};
+
+  const entradas=dados.filter(f=>f.tipo==="entrada").reduce((s,f)=>s+Number(f.valor||0),0);
+  const saidas=dados.filter(f=>f.tipo==="saida").reduce((s,f)=>s+Number(f.valor||0),0);
+  const vis=dados.filter(f=>(filtro==="todos"||f.tipo===filtro)&&(busca===""||f.descricao.toLowerCase().includes(busca.toLowerCase())));
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        <KPI label="Total entradas" value={"R$ "+(entradas/1000).toFixed(1)+"K"} color={C.green}/>
+        <KPI label="Total saídas" value={"R$ "+(saidas/1000).toFixed(1)+"K"} color={C.red}/>
+        <KPI label="Saldo" value={"R$ "+((entradas-saidas)/1000).toFixed(1)+"K"} color={entradas>=saidas?C.green:C.red}/>
+        <KPI label="Movimentações" value={dados.length} sub="registros"/>
+      </div>
+
+      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+        <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar descrição..." style={{flex:1,...inp}}/>
+        {["todos","entrada","saida"].map(f=>(
+          <button key={f} onClick={()=>setFiltro(f)} style={{padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",background:filtro===f?C.blue:"#f3f4f6",color:filtro===f?"#fff":C.gray}}>
+            {f==="todos"?"Todos":f==="entrada"?"Entradas":"Saídas"}
+          </button>
+        ))}
+        {!(!empresaId)&&<button onClick={()=>abrir()} style={{...btnP,whiteSpace:"nowrap"}}>+ Lançamento</button>}
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+        {loading?<div style={{padding:40,textAlign:"center"}}><Spinner/></div>:vis.length===0?<Empty/>:(
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead><tr style={{background:"#f9fafb"}}>{["Data","Descrição","Categoria","Tipo","Valor","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:12}}>{h}</th>)}</tr></thead>
+            <tbody>{vis.map((f,i)=>(
+              <tr key={f.id||i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                <td style={{padding:"9px 12px",color:C.gray}}>{fmtDate(f.data)}</td>
+                <td style={{padding:"9px 12px",fontWeight:500,color:"#111827"}}>{f.descricao}</td>
+                <td style={{padding:"9px 12px",color:C.gray}}>{f.categoria||"—"}</td>
+                <td style={{padding:"9px 12px"}}><Badge type={f.tipo==="entrada"?"green":"red"}>{f.tipo}</Badge></td>
+                <td style={{padding:"9px 12px",fontWeight:600,color:f.tipo==="entrada"?C.green:C.red}}>{f.tipo==="entrada"?"+":"-"}{fmtBRL(f.valor)}</td>
+                <td style={{padding:"9px 12px"}}>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>abrir(f)} style={{padding:"3px 9px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}}>✏️</button>
+                    <button onClick={()=>setConfirmDel(f.id)} style={{padding:"3px 9px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}}>🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </div>
+
+      {showForm&&(
+        <Modal title={editItem?"✏️ Editar lançamento":"+ Novo lançamento"} onClose={()=>setShowForm(false)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+            <div style={{gridColumn:"1/-1"}}><FormField label="Descrição *"><input value={form.descricao} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} style={inp}/></FormField></div>
+            <FormField label="Tipo"><select value={form.tipo} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))} style={inp}><option value="entrada">Entrada</option><option value="saida">Saída</option></select></FormField>
+            <FormField label="Valor (R$) *"><input type="number" value={form.valor} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Data"><input type="date" value={form.data||""} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Categoria"><select value={form.categoria} onChange={e=>setForm(f=>({...f,categoria:e.target.value}))} style={inp}>{CATS.map(c=><option key={c}>{c}</option>)}</select></FormField>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowForm(false)} style={btnS}>Cancelar</button>
+            <button onClick={salvar} style={btnP}>💾 Salvar</button>
+          </div>
+        </Modal>
+      )}
+      {confirmDel&&(
+        <Modal title="🗑️ Excluir?" onClose={()=>setConfirmDel(null)} width={360}>
+          <div style={{fontSize:13,color:C.gray,marginBottom:20}}>Esta ação não pode ser desfeita.</div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setConfirmDel(null)} style={btnS}>Cancelar</button>
+            <button onClick={excluir} style={{...btnP,background:C.red}}>Excluir</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── ESTOQUE ───────────────────────────────────────────────────────────────
+const QUALIDADE_CFG={
+  bom:         {label:"Bom",           icon:"🌡️",  color:"#16a34a", bg:"#dcfce7", desc:"Estoque saudável e disponível"},
+  aprendizado: {label:"Em aprendizado",icon:"🎓",  color:"#2563eb", bg:"#dbeafe", desc:"Produto novo sendo testado"},
+  congelado:   {label:"Congelado",     icon:"🧊",  color:"#0891b2", bg:"#e0f2fe", desc:"Sem giro — pausado"},
+  eterno:      {label:"Et. congelado", icon:"❄️",  color:"#1e40af", bg:"#bfdbfe", desc:"Parado há muito tempo"},
+  atencao:     {label:"Precisa atenção",icon:"⚠️", color:"#d97706", bg:"#fef3c7", desc:"Giro lento — monitorar"},
+  ruim:        {label:"Ruim",          icon:"📉",  color:"#dc2626", bg:"#fee2e2", desc:"Demorou muito para vender"},
+};
+
+function EstoquePanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[diasCobertura,setDiasCobertura]=useState(30);
+  const[diasInput,setDiasInput]=useState("30");
+  const[busca,setBusca]=useState("");
+  const[filtroStatus,setFiltroStatus]=useState("todos");
+  const[filtroQual,setFiltroQual]=useState("todos");
+  const[abaView,setAbaView]=useState("tabela"); // tabela | saude
+  const FORM0={empresa_id:empresaId,sku:"",nome:"",custo:"",preco_venda:"",quantidade:"",venda_dia:"",lead_time:7,estoque_minimo:10,fornecedor:"",qualidade:"bom"};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.estoque(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const calc=(p)=>{
+    const q=Number(p.quantidade)||0,vd=Number(p.venda_dia)||0,lt=Number(p.lead_time)||0,min=Number(p.estoque_minimo)||0;
+    const cobertura=vd>0?q/vd:999;
+    const seg=Math.ceil(vd*lt);
+    const nec=Math.ceil(vd*diasCobertura)+seg;
+    const comprar=Math.max(0,nec-q);
+    const statusComp=q<=min?"critico":cobertura<diasCobertura?"repor":"ok";
+    return{...p,cobertura:Math.round(cobertura),seg,nec,comprar,
+      valorComprar:comprar*(Number(p.custo)||0),
+      valorEstoque:q*(Number(p.custo)||0),
+      statusComp,
+      qualidade:p.qualidade||"bom"
+    };
+  };
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId,qualidade:item.qualidade||"bom"}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.nome){alert("Preencha o nome do produto");return;}
+    await DB.saveEstoque({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delEstoque(confirmDel);setConfirmDel(null);carregar();};
+
+  const mudarQualidade=async(p,novaQual)=>{
+    await DB.saveEstoque({...p,qualidade:novaQual});
+    setDados(prev=>prev.map(d=>d.id===p.id?{...d,qualidade:novaQual}:d));
+  };
+
+  const processados=dados.map(calc);
+  const scfgComp={critico:{label:"🚨 Crítico",color:C.red,bg:C.redL},repor:{label:"⚠️ Repor",color:C.amber,bg:C.amberL},ok:{label:"✅ OK",color:C.green,bg:C.greenL}};
+  const totalEstoque=processados.reduce((s,p)=>s+p.valorEstoque,0);
+  const totalComprar=processados.reduce((s,p)=>s+p.valorComprar,0);
+
+  const vis=processados.filter(p=>
+    (filtroStatus==="todos"||p.statusComp===filtroStatus)&&
+    (filtroQual==="todos"||p.qualidade===filtroQual)&&
+    (busca===""||p.nome.toLowerCase().includes(busca.toLowerCase())||( p.sku||"").toLowerCase().includes(busca.toLowerCase()))
+  );
+
+  // Saúde do estoque — agrupa por qualidade
+  const saudeData=Object.entries(QUALIDADE_CFG).map(([key,cfg])=>{
+    const itens=processados.filter(p=>(p.qualidade||"bom")===key);
+    const valor=itens.reduce((s,p)=>s+p.valorEstoque,0);
+    const pct=totalEstoque>0?((valor/totalEstoque)*100):0;
+    return{key,cfg,itens,valor,pct,qtd:itens.length};
+  });
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        <KPI label="Valor em estoque" value={"R$ "+(totalEstoque/1000).toFixed(0)+"K"} sub={dados.length+" SKUs"}/>
+        <KPI label="Estoque Bom" value={"R$ "+(processados.filter(p=>(p.qualidade||"bom")==="bom").reduce((s,p)=>s+p.valorEstoque,0)/1000).toFixed(0)+"K"} color={C.green}/>
+        <KPI label="Congelado+Ruim" value={"R$ "+(processados.filter(p=>["congelado","eterno","ruim"].includes(p.qualidade||"bom")).reduce((s,p)=>s+p.valorEstoque,0)/1000).toFixed(0)+"K"} color={C.red}/>
+        <KPI label="Custo p/ reposição" value={"R$ "+(totalComprar/1000).toFixed(0)+"K"} color={C.amber}/>
+      </div>
+
+      {/* Abas */}
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <button onClick={()=>setAbaView("tabela")} style={{padding:"7px 16px",borderRadius:8,fontSize:12,fontWeight:500,cursor:"pointer",border:"none",background:abaView==="tabela"?C.blue:"#f3f4f6",color:abaView==="tabela"?"#fff":C.gray}}>📦 Tabela de produtos</button>
+        <button onClick={()=>setAbaView("saude")} style={{padding:"7px 16px",borderRadius:8,fontSize:12,fontWeight:500,cursor:"pointer",border:"none",background:abaView==="saude"?C.blue:"#f3f4f6",color:abaView==="saude"?"#fff":C.gray}}>🌡️ Saúde do Estoque</button>
+      </div>
+
+      {/* SAÚDE DO ESTOQUE */}
+      {abaView==="saude"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}}>
+            <div style={{fontSize:14,fontWeight:700,color:"#111827",marginBottom:4}}>🌡️ Saúde do Estoque</div>
+            <div style={{fontSize:12,color:C.gray,marginBottom:16}}>Classificação do valor em estoque por qualidade · Total: {fmtBRL(totalEstoque)}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {saudeData.map(({key,cfg,itens,valor,pct,qtd})=>(
+                <div key={key} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 14px",background:cfg.bg+"80",borderRadius:10,border:`1px solid ${cfg.bg}`}}>
+                  <div style={{width:40,height:40,borderRadius:10,background:cfg.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{cfg.icon}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                      <div>
+                        <span style={{fontSize:13,fontWeight:600,color:cfg.color}}>{cfg.label}</span>
+                        <span style={{fontSize:11,color:C.gray,marginLeft:8}}>{cfg.desc}</span>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        <div style={{fontSize:14,fontWeight:700,color:cfg.color}}>{fmtBRL(valor)}</div>
+                        <div style={{fontSize:11,color:C.gray}}>{qtd} produto{qtd!==1?"s":""} · {pct.toFixed(2)}%</div>
+                      </div>
+                    </div>
+                    <div style={{background:"rgba(0,0,0,0.08)",borderRadius:100,height:7,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${pct}%`,background:cfg.color,borderRadius:100,transition:"width .5s",minWidth:pct>0?4:0}}/>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Detalhamento por qualidade */}
+          {saudeData.filter(s=>s.qtd>0).map(({key,cfg,itens})=>(
+            <div key={key} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                <span style={{fontSize:18}}>{cfg.icon}</span>
+                <span style={{fontSize:13,fontWeight:600,color:cfg.color}}>{cfg.label}</span>
+                <span style={{fontSize:11,color:C.gray}}>— {itens.length} produto{itens.length!==1?"s":""}</span>
+              </div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead><tr style={{background:"#f9fafb"}}>{["SKU","Produto","Qtd","Valor estoque","Cobertura","Alterar classificação"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"7px 10px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11}}>{h}</th>)}</tr></thead>
+                <tbody>{itens.map((p,i)=>(
+                  <tr key={p.id||i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                    <td style={{padding:"7px 10px",color:C.gray,fontFamily:"monospace",fontSize:11}}>{p.sku||"—"}</td>
+                    <td style={{padding:"7px 10px",fontWeight:500,color:"#374151"}}>{p.nome}</td>
+                    <td style={{padding:"7px 10px",color:"#374151"}}>{p.quantidade} un.</td>
+                    <td style={{padding:"7px 10px",fontWeight:600,color:"#374151"}}>{fmtBRL(p.valorEstoque)}</td>
+                    <td style={{padding:"7px 10px",color:p.cobertura<diasCobertura?C.amber:C.green,fontWeight:600}}>{p.cobertura===999?"∞":p.cobertura+"d"}</td>
+                    <td style={{padding:"7px 10px"}}>
+                      <select value={p.qualidade||"bom"} onChange={e=>mudarQualidade(p,e.target.value)}
+                        style={{fontSize:11,padding:"3px 6px",borderRadius:6,border:"1px solid #e5e7eb",background:"#fff",cursor:"pointer",color:QUALIDADE_CFG[p.qualidade||"bom"]?.color}}>
+                        {Object.entries(QUALIDADE_CFG).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}
+                      </select>
+                    </td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* TABELA */}
+      {abaView==="tabela"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {/* Configurador dias */}
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:14}}>
+            <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+              <div><div style={{fontSize:12,fontWeight:600}}>⚙️ Cobertura de compra</div><div style={{fontSize:11,color:C.gray}}>Quantos dias de estoque garantir</div></div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginLeft:"auto",flexWrap:"wrap"}}>
+                {[7,15,30,45,60,90].map(d=>(
+                  <button key={d} onClick={()=>{setDiasCobertura(d);setDiasInput(String(d));}} style={{padding:"5px 12px",borderRadius:7,fontSize:12,fontWeight:500,cursor:"pointer",border:"none",background:diasCobertura===d?C.blue:"#f3f4f6",color:diasCobertura===d?"#fff":C.gray}}>{d}d</button>
+                ))}
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <input value={diasInput} onChange={e=>setDiasInput(e.target.value)} onBlur={()=>{const v=parseInt(diasInput);if(v>0)setDiasCobertura(v);}} style={{width:56,padding:"5px 8px",borderRadius:7,border:"1px solid #e5e7eb",fontSize:12,textAlign:"center"}} placeholder="Outro"/>
+                  <span style={{fontSize:12,color:C.gray}}>dias</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar produto ou SKU..." style={{flex:1,...inp,minWidth:160}}/>
+            <select value={filtroQual} onChange={e=>setFiltroQual(e.target.value)} style={{...inp,width:"auto",padding:"7px 10px"}}>
+              <option value="todos">Todas classificações</option>
+              {Object.entries(QUALIDADE_CFG).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}
+            </select>
+            {["todos","critico","repor","ok"].map(f=>(
+              <button key={f} onClick={()=>setFiltroStatus(f)} style={{padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",background:filtroStatus===f?C.blue:"#f3f4f6",color:filtroStatus===f?"#fff":C.gray}}>
+                {f==="todos"?"Todos comp.":scfgComp[f]?.label||f}
+              </button>
+            ))}
+            {!(!empresaId)&&<button onClick={()=>abrir()} style={{...btnP,whiteSpace:"nowrap"}}>+ Produto</button>}
+          </div>
+
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+            {loading?<div style={{padding:40,textAlign:"center"}}><Spinner/></div>:vis.length===0?<Empty/>:(
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:1000}}>
+                  <thead><tr style={{background:"#f9fafb"}}>{["Qualidade","Produto","Qtd","Venda/dia","Cobertura","Comprar","Val. estoque","Status","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+                  <tbody>{vis.map((p,i)=>{
+                    const sc=scfgComp[p.statusComp];
+                    const qc=QUALIDADE_CFG[p.qualidade||"bom"];
+                    return(
+                      <tr key={p.id||i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                        <td style={{padding:"9px 12px"}}>
+                          <select value={p.qualidade||"bom"} onChange={e=>mudarQualidade(p,e.target.value)}
+                            style={{fontSize:11,padding:"3px 7px",borderRadius:6,border:`1px solid ${qc.color}40`,background:qc.bg,color:qc.color,fontWeight:600,cursor:"pointer"}}>
+                            {Object.entries(QUALIDADE_CFG).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}
+                          </select>
+                        </td>
+                        <td style={{padding:"9px 12px"}}><div style={{fontWeight:600,color:"#111827"}}>{p.nome}</div><div style={{fontSize:10,color:C.gray}}>{p.sku||""}{p.fornecedor?" · "+p.fornecedor:""}</div></td>
+                        <td style={{padding:"9px 12px",fontWeight:600,color:p.quantidade<=p.estoque_minimo?C.red:"#374151"}}>{p.quantidade}<div style={{fontSize:10,color:C.gray}}>mín:{p.estoque_minimo}</div></td>
+                        <td style={{padding:"9px 12px"}}>{Number(p.venda_dia).toFixed(1)}</td>
+                        <td style={{padding:"9px 12px"}}>
+                          <span style={{fontWeight:600,color:p.cobertura<diasCobertura?C.amber:C.green}}>{p.cobertura===999?"∞":p.cobertura+"d"}</span>
+                          <div style={{marginTop:3,background:"#f3f4f6",borderRadius:100,height:4,width:60}}><div style={{height:"100%",width:`${Math.min(100,(p.cobertura/diasCobertura)*100)}%`,background:p.cobertura>=diasCobertura?C.green:C.amber,borderRadius:100}}/></div>
+                        </td>
+                        <td style={{padding:"9px 12px",fontWeight:700,color:p.comprar>0?C.blue:C.gray}}>{p.comprar>0?p.comprar+" un.":"—"}</td>
+                        <td style={{padding:"9px 12px"}}>{fmtBRL(p.valorEstoque)}</td>
+                        <td style={{padding:"9px 12px"}}><span style={{fontSize:10,fontWeight:600,padding:"2px 7px",borderRadius:100,background:sc.bg,color:sc.color}}>{sc.label}</span></td>
+                        <td style={{padding:"9px 12px"}}>
+                          <div style={{display:"flex",gap:4}}>
+                            <button onClick={()=>abrir(p)} style={{padding:"3px 9px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}}>✏️</button>
+                            <button onClick={()=>setConfirmDel(p.id)} style={{padding:"3px 9px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}}>🗑️</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}</tbody>
+                </table>
+              </div>
+            )}
+            <div style={{padding:"10px 16px",borderTop:"1px solid #e5e7eb",background:"#f9fafb",fontSize:12,color:C.gray,display:"flex",gap:24,flexWrap:"wrap"}}>
+              <span>Valor visível: <strong style={{color:"#374151"}}>{fmtBRL(vis.reduce((s,p)=>s+p.valorEstoque,0))}</strong></span>
+              <span>A comprar: <strong style={{color:C.red}}>{fmtBRL(vis.reduce((s,p)=>s+p.valorComprar,0))}</strong></span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showForm&&(
+        <Modal title={editItem?"✏️ Editar produto":"+ Novo produto"} onClose={()=>setShowForm(false)} width={560}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+            <div style={{gridColumn:"1/-1"}}><FormField label="Nome do produto *"><input value={form.nome} onChange={e=>setForm(f=>({...f,nome:e.target.value}))} style={inp}/></FormField></div>
+            <FormField label="SKU / Código"><input value={form.sku||""} onChange={e=>setForm(f=>({...f,sku:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Fornecedor"><input value={form.fornecedor||""} onChange={e=>setForm(f=>({...f,fornecedor:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Custo (R$)"><input type="number" value={form.custo||""} onChange={e=>setForm(f=>({...f,custo:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Preço de venda (R$)"><input type="number" value={form.preco_venda||""} onChange={e=>setForm(f=>({...f,preco_venda:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Quantidade em estoque"><input type="number" value={form.quantidade||""} onChange={e=>setForm(f=>({...f,quantidade:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Venda média/dia"><input type="number" step="0.1" value={form.venda_dia||""} onChange={e=>setForm(f=>({...f,venda_dia:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Lead time (dias)"><input type="number" value={form.lead_time||7} onChange={e=>setForm(f=>({...f,lead_time:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Estoque mínimo"><input type="number" value={form.estoque_minimo||10} onChange={e=>setForm(f=>({...f,estoque_minimo:e.target.value}))} style={inp}/></FormField>
+            <div style={{gridColumn:"1/-1"}}>
+              <FormField label="Classificação de qualidade">
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:4}}>
+                  {Object.entries(QUALIDADE_CFG).map(([k,v])=>(
+                    <button key={k} onClick={()=>setForm(f=>({...f,qualidade:k}))} style={{padding:"8px 10px",borderRadius:9,border:`2px solid ${form.qualidade===k?v.color:"#e5e7eb"}`,background:form.qualidade===k?v.bg:"#fff",cursor:"pointer",textAlign:"left"}}>
+                      <div style={{fontSize:14,marginBottom:2}}>{v.icon}</div>
+                      <div style={{fontSize:12,fontWeight:600,color:v.color}}>{v.label}</div>
+                      <div style={{fontSize:10,color:C.gray}}>{v.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </FormField>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowForm(false)} style={btnS}>Cancelar</button>
+            <button onClick={salvar} style={btnP}>💾 Salvar</button>
+          </div>
+        </Modal>
+      )}
+      {confirmDel&&(
+        <Modal title="🗑️ Excluir produto?" onClose={()=>setConfirmDel(null)} width={360}>
+          <div style={{fontSize:13,color:C.gray,marginBottom:20}}>Esta ação não pode ser desfeita.</div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setConfirmDel(null)} style={btnS}>Cancelar</button>
+            <button onClick={excluir} style={{...btnP,background:C.red}}>Excluir</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── DEVOLUÇÕES ────────────────────────────────────────────────────────────
+function DevolucoesPanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[busca,setBusca]=useState("");
+  const[filtro,setFiltro]=useState("todos");
+  const MOTIVOS=["Produto com defeito","Produto diferente do pedido","Arrependimento","Danificado na entrega","Prazo excedido","Outro"];
+  const DESTINOS=["Volta ao estoque","Avaria / Descarte","Análise técnica","Devolução ao fornecedor"];
+  const STATUS_LIST=["Em análise","Aguardando produto","Reembolso pendente","Concluída","Recusada"];
+  const statusBadge={"Em análise":"amber","Aguardando produto":"blue","Reembolso pendente":"purple",Concluída:"green",Recusada:"red"};
+  const FORM0={empresa_id:empresaId,cliente:"",pedido:"",produto:"",quantidade:1,valor_venda:"",reembolso:"",motivo:MOTIVOS[0],destino:DESTINOS[0],status:"Em análise",observacoes:""};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.devolucoes(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.cliente||!form.produto){alert("Preencha cliente e produto");return;}
+    await DB.saveDevolvucao({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delDevolucao(confirmDel);setConfirmDel(null);carregar();};
+  const avancar=async(item)=>{
+    const idx=STATUS_LIST.indexOf(item.status);
+    if(idx<STATUS_LIST.length-1){
+      await DB.saveDevolvucao({...item,status:STATUS_LIST[idx+1]});
+      carregar();
+    }
+  };
+
+  const vis=dados.filter(d=>(filtro==="todos"||d.status===filtro)&&(busca===""||[d.cliente,d.produto,d.pedido||""].some(v=>v.toLowerCase().includes(busca.toLowerCase()))));
+  const totalReembolso=dados.reduce((s,d)=>s+Number(d.reembolso||0),0);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        <KPI label="Total devoluções" value={dados.length} sub={"R$ "+(totalReembolso/1000).toFixed(1)+"K em reembolsos"}/>
+        <KPI label="Em análise" value={dados.filter(d=>d.status==="Em análise").length} color={C.amber}/>
+        <KPI label="Concluídas" value={dados.filter(d=>d.status==="Concluída").length} color={C.green}/>
+        <KPI label="Reembolso pendente" value={dados.filter(d=>d.status==="Reembolso pendente").length} color={C.purple}/>
+      </div>
+
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+        <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar cliente, produto..." style={{flex:1,...inp}}/>
+        {["todos",...STATUS_LIST].map(f=>(
+          <button key={f} onClick={()=>setFiltro(f)} style={{padding:"6px 10px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",whiteSpace:"nowrap",background:filtro===f?C.blue:"#f3f4f6",color:filtro===f?"#fff":C.gray}}>
+            {f==="todos"?"Todos":f}
+          </button>
+        ))}
+        {!(!empresaId)&&<button onClick={()=>abrir()} style={{...btnP,whiteSpace:"nowrap"}}>+ Nova</button>}
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+        {loading?<div style={{padding:40,textAlign:"center"}}><Spinner/></div>:vis.length===0?<Empty/>:(
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:900}}>
+              <thead><tr style={{background:"#f9fafb"}}>{["Data","Cliente","Produto","Qtd","Reembolso","Motivo","Destino","Status","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+              <tbody>{vis.map((d,i)=>(
+                <tr key={d.id||i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                  <td style={{padding:"9px 12px",color:C.gray,whiteSpace:"nowrap"}}>{fmtDate(d.data)}</td>
+                  <td style={{padding:"9px 12px",fontWeight:500,color:"#111827"}}>{d.cliente}</td>
+                  <td style={{padding:"9px 12px",color:"#374151",maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.produto}</td>
+                  <td style={{padding:"9px 12px",textAlign:"center"}}>{d.quantidade}</td>
+                  <td style={{padding:"9px 12px",fontWeight:600,color:C.red,whiteSpace:"nowrap"}}>{fmtBRL(d.reembolso)}</td>
+                  <td style={{padding:"9px 12px",color:C.gray,fontSize:11,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.motivo}</td>
+                  <td style={{padding:"9px 12px",fontSize:11,whiteSpace:"nowrap"}}>{d.destino}</td>
+                  <td style={{padding:"9px 12px"}}><Badge type={statusBadge[d.status]||"gray"}>{d.status}</Badge></td>
+                  <td style={{padding:"9px 12px"}}>
+                    <div style={{display:"flex",gap:3}}>
+                      {STATUS_LIST.indexOf(d.status)<STATUS_LIST.length-1&&<button onClick={()=>avancar(d)} style={{padding:"3px 7px",borderRadius:6,background:"#eff6ff",border:"none",fontSize:10,cursor:"pointer",color:C.blue,whiteSpace:"nowrap"}}>▶</button>}
+                      <button onClick={()=>abrir(d)} style={{padding:"3px 7px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}}>✏️</button>
+                      <button onClick={()=>setConfirmDel(d.id)} style={{padding:"3px 7px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}}>🗑️</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {showForm&&(
+        <Modal title={editItem?"✏️ Editar devolução":"🔄 Registrar devolução"} onClose={()=>setShowForm(false)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+            <FormField label="Cliente *"><input value={form.cliente} onChange={e=>setForm(f=>({...f,cliente:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Pedido de origem"><input value={form.pedido||""} onChange={e=>setForm(f=>({...f,pedido:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Produto *"><input value={form.produto} onChange={e=>setForm(f=>({...f,produto:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Quantidade"><input type="number" value={form.quantidade} onChange={e=>setForm(f=>({...f,quantidade:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Valor da venda (R$)"><input type="number" value={form.valor_venda||""} onChange={e=>setForm(f=>({...f,valor_venda:e.target.value,reembolso:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Valor reembolso (R$)"><input type="number" value={form.reembolso||""} onChange={e=>setForm(f=>({...f,reembolso:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Motivo"><select value={form.motivo} onChange={e=>setForm(f=>({...f,motivo:e.target.value}))} style={inp}>{MOTIVOS.map(m=><option key={m}>{m}</option>)}</select></FormField>
+            <FormField label="Destino"><select value={form.destino} onChange={e=>setForm(f=>({...f,destino:e.target.value}))} style={inp}>{DESTINOS.map(d=><option key={d}>{d}</option>)}</select></FormField>
+            <FormField label="Status"><select value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))} style={inp}>{STATUS_LIST.map(s=><option key={s}>{s}</option>)}</select></FormField>
+            <div style={{gridColumn:"1/-1"}}><FormField label="Observações"><textarea value={form.observacoes||""} onChange={e=>setForm(f=>({...f,observacoes:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/></FormField></div>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowForm(false)} style={btnS}>Cancelar</button>
+            <button onClick={salvar} style={btnP}>💾 Salvar</button>
+          </div>
+        </Modal>
+      )}
+      {confirmDel&&(
+        <Modal title="🗑️ Excluir?" onClose={()=>setConfirmDel(null)} width={360}>
+          <div style={{fontSize:13,color:C.gray,marginBottom:20}}>Esta ação não pode ser desfeita.</div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setConfirmDel(null)} style={btnS}>Cancelar</button>
+            <button onClick={excluir} style={{...btnP,background:C.red}}>Excluir</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── CLIENTES / FORNECEDORES ───────────────────────────────────────────────
+function ContatosPanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[busca,setBusca]=useState("");
+  const[filtro,setFiltro]=useState("todos");
+  const FORM0={empresa_id:empresaId,nome:"",tipo:"Cliente",cnpj_cpf:"",cidade:"",status:"Ativo"};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.contatos(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.nome){alert("Preencha o nome");return;}
+    await DB.saveContato({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delContato(confirmDel);setConfirmDel(null);carregar();};
+
+  const vis=dados.filter(c=>(filtro==="todos"||c.tipo===filtro)&&(busca===""||c.nome.toLowerCase().includes(busca.toLowerCase())));
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+        <KPI label="Total" value={dados.length} sub="cadastros"/>
+        <KPI label="Clientes" value={dados.filter(c=>c.tipo==="Cliente").length} color={C.blue}/>
+        <KPI label="Fornecedores" value={dados.filter(c=>c.tipo==="Fornecedor").length} color={C.amber}/>
+      </div>
+
+      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+        <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar nome..." style={{flex:1,...inp}}/>
+        {["todos","Cliente","Fornecedor"].map(f=>(
+          <button key={f} onClick={()=>setFiltro(f)} style={{padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",background:filtro===f?C.blue:"#f3f4f6",color:filtro===f?"#fff":C.gray}}>
+            {f==="todos"?"Todos":f+"s"}
+          </button>
+        ))}
+        {!(!empresaId)&&<button onClick={()=>abrir()} style={{...btnP,whiteSpace:"nowrap"}}>+ Cadastrar</button>}
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+        {loading?<div style={{padding:40,textAlign:"center"}}><Spinner/></div>:vis.length===0?<Empty/>:(
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead><tr style={{background:"#f9fafb"}}>{["Nome","Tipo","CNPJ/CPF","Cidade","Status","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:12}}>{h}</th>)}</tr></thead>
+            <tbody>{vis.map((c,i)=>(
+              <tr key={c.id||i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                <td style={{padding:"9px 12px",fontWeight:500,color:"#111827"}}>{c.nome}</td>
+                <td style={{padding:"9px 12px"}}><Badge type={c.tipo==="Cliente"?"blue":"amber"}>{c.tipo}</Badge></td>
+                <td style={{padding:"9px 12px",color:C.gray}}>{c.cnpj_cpf||"—"}</td>
+                <td style={{padding:"9px 12px",color:C.gray}}>{c.cidade||"—"}</td>
+                <td style={{padding:"9px 12px"}}><Badge type={c.status==="Ativo"?"green":"red"}>{c.status}</Badge></td>
+                <td style={{padding:"9px 12px"}}>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>abrir(c)} style={{padding:"3px 9px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}}>✏️</button>
+                    <button onClick={()=>setConfirmDel(c.id)} style={{padding:"3px 9px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}}>🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </div>
+
+      {showForm&&(
+        <Modal title={editItem?"✏️ Editar cadastro":"+ Novo cadastro"} onClose={()=>setShowForm(false)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+            <div style={{gridColumn:"1/-1"}}><FormField label="Nome *"><input value={form.nome} onChange={e=>setForm(f=>({...f,nome:e.target.value}))} style={inp}/></FormField></div>
+            <FormField label="Tipo"><select value={form.tipo} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))} style={inp}><option>Cliente</option><option>Fornecedor</option></select></FormField>
+            <FormField label="CNPJ / CPF"><input value={form.cnpj_cpf||""} onChange={e=>setForm(f=>({...f,cnpj_cpf:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Cidade"><input value={form.cidade||""} onChange={e=>setForm(f=>({...f,cidade:e.target.value}))} style={inp}/></FormField>
+            <FormField label="Status"><select value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))} style={inp}><option>Ativo</option><option>Inativo</option><option>Inadimplente</option></select></FormField>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowForm(false)} style={btnS}>Cancelar</button>
+            <button onClick={salvar} style={btnP}>💾 Salvar</button>
+          </div>
+        </Modal>
+      )}
+      {confirmDel&&(
+        <Modal title="🗑️ Excluir cadastro?" onClose={()=>setConfirmDel(null)} width={360}>
+          <div style={{fontSize:13,color:C.gray,marginBottom:20}}>Esta ação não pode ser desfeita.</div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setConfirmDel(null)} style={btnS}>Cancelar</button>
+            <button onClick={excluir} style={{...btnP,background:C.red}}>Excluir</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── GERENCIAR EMPRESAS ────────────────────────────────────────────────────
+function EmpresasPanel({onReload}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[editItem,setEditItem]=useState(null);
+  const[showForm,setShowForm]=useState(false);
+  const[form,setForm]=useState({});
+  const[showToken,setShowToken]=useState(false);
+  const SEGS=["Comércio","Serviços","Indústria","Tecnologia","Saúde","Educação","Outro"];
+  const REGS=["Simples Nacional","Lucro Presumido","Lucro Real","MEI"];
+  const ICONS=["🏢","🏗️","🛒","💻","🏥","🎓","🏭","🚚"];
+  const CORES=[C.blue,C.green,C.purple,C.amber,"#e11d48","#0891b2","#065f46"];
+  const FORM0={nome:"",cnpj:"",segmento:"Comércio",regime:"Simples Nacional",icon:"🏢",cor:C.blue,olist_token:""};
+
+  const carregar=async()=>{setLoading(true);const d=await DB.empresas();setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,olist_token:item.olist_token||""}:FORM0);setShowToken(false);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.nome){alert("Informe o nome da empresa");return;}
+    await DB.saveEmpresa(form);
+    setShowForm(false);carregar();onReload();
+  };
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div><div style={{fontSize:14,fontWeight:600}}>🏢 Empresas / CNPJs</div><div style={{fontSize:12,color:C.gray}}>Cada empresa tem seu próprio token Olist e dados financeiros independentes</div></div>
+        <button onClick={()=>abrir()} style={btnP}>+ Adicionar empresa</button>
+      </div>
+
+      {loading?<div style={{padding:40,textAlign:"center"}}><Spinner/></div>:dados.length===0?<Empty msg="Nenhuma empresa cadastrada. Adicione sua primeira empresa!"/>:(
+        dados.map(emp=>(
+          <div key={emp.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}}>
+            <div style={{display:"flex",alignItems:"center",gap:16}}>
+              <div style={{width:48,height:48,borderRadius:12,background:(emp.cor||C.blue)+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>{emp.icon||"🏢"}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:14,fontWeight:600,color:"#111827"}}>{emp.nome}</div>
+                <div style={{fontSize:12,color:C.gray,marginTop:2}}>CNPJ: {emp.cnpj||"—"}</div>
+                <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
+                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:100,background:(emp.cor||C.blue)+"18",color:emp.cor||C.blue,fontWeight:500}}>{emp.segmento}</span>
+                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:100,background:"#f3f4f6",color:C.gray}}>{emp.regime}</span>
+                  {emp.olist_token
+                    ?<span style={{fontSize:11,padding:"2px 8px",borderRadius:100,background:C.greenL,color:"#166534",fontWeight:600}}>🛒 Token Olist ✅</span>
+                    :<span style={{fontSize:11,padding:"2px 8px",borderRadius:100,background:C.amberL,color:"#92400e",fontWeight:600}}>🛒 Token Olist não configurado</span>
+                  }
+                </div>
+              </div>
+              <button onClick={()=>abrir(emp)} style={{padding:"7px 14px",borderRadius:8,border:"1px solid #e5e7eb",background:"#fff",fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}}>✏️ Editar</button>
+            </div>
+            {emp.olist_token&&(
+              <div style={{marginTop:10,padding:"8px 12px",background:"#f9fafb",borderRadius:8,fontSize:11,color:C.gray,fontFamily:"monospace"}}>
+                Token: {emp.olist_token.slice(0,20)}...
+              </div>
+            )}
+          </div>
+        ))
+      )}
+
+      {showForm&&(
+        <Modal title={editItem?"✏️ Editar empresa":"🏢 Nova empresa"} onClose={()=>setShowForm(false)} width={560}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+            <div style={{gridColumn:"1/-1"}}><FormField label="Nome da empresa *"><input value={form.nome||""} onChange={e=>setForm(f=>({...f,nome:e.target.value}))} style={inp}/></FormField></div>
+            <FormField label="CNPJ"><input value={form.cnpj||""} onChange={e=>setForm(f=>({...f,cnpj:e.target.value}))} placeholder="00.000.000/0001-00" style={inp}/></FormField>
+            <FormField label="Segmento"><select value={form.segmento||"Comércio"} onChange={e=>setForm(f=>({...f,segmento:e.target.value}))} style={inp}>{SEGS.map(s=><option key={s}>{s}</option>)}</select></FormField>
+            <div style={{gridColumn:"1/-1"}}><FormField label="Regime tributário"><select value={form.regime||"Simples Nacional"} onChange={e=>setForm(f=>({...f,regime:e.target.value}))} style={inp}>{REGS.map(r=><option key={r}>{r}</option>)}</select></FormField></div>
+
+            {/* TOKEN OLIST */}
+            <div style={{gridColumn:"1/-1"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                <div style={{fontSize:11,color:C.gray,fontWeight:500}}>🛒 Token Olist (Bearer)</div>
+                <button onClick={()=>setShowToken(v=>!v)} style={{fontSize:10,padding:"2px 8px",borderRadius:6,border:"1px solid #e5e7eb",background:"#fff",cursor:"pointer",color:C.gray}}>
+                  {showToken?"🙈 Ocultar":"👁 Mostrar"}
+                </button>
+              </div>
+              <input
+                type={showToken?"text":"password"}
+                value={form.olist_token||""}
+                onChange={e=>setForm(f=>({...f,olist_token:e.target.value}))}
+                placeholder="Cole o token Bearer do Olist desta empresa..."
+                style={{...inp,fontFamily:"monospace",fontSize:12}}
+              />
+              <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>
+                No Olist: Configurações → Extensões → Token API → Gerar token
+              </div>
+              {form.olist_token&&(
+                <div style={{marginTop:6,padding:"6px 10px",background:C.greenL,borderRadius:6,fontSize:11,color:"#166534"}}>
+                  ✅ Token configurado — será usado automaticamente ao importar dados desta empresa
+                </div>
+              )}
+            </div>
+
+            <div style={{gridColumn:"1/-1"}}>
+              <FormField label="Ícone">
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>{ICONS.map(ic=><button key={ic} onClick={()=>setForm(f=>({...f,icon:ic}))} style={{width:36,height:36,borderRadius:8,border:`2px solid ${form.icon===ic?C.blue:"#e5e7eb"}`,background:"#fff",fontSize:18,cursor:"pointer"}}>{ic}</button>)}</div>
+              </FormField>
+            </div>
+            <div style={{gridColumn:"1/-1"}}>
+              <FormField label="Cor">
+                <div style={{display:"flex",gap:8,marginTop:4}}>{CORES.map(cor=><button key={cor} onClick={()=>setForm(f=>({...f,cor}))} style={{width:28,height:28,borderRadius:"50%",background:cor,border:`3px solid ${form.cor===cor?"#111":"transparent"}`,cursor:"pointer"}}/> )}</div>
+              </FormField>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowForm(false)} style={btnS}>Cancelar</button>
+            <button onClick={salvar} style={btnP}>💾 Salvar</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── USUÁRIOS ──────────────────────────────────────────────────────────────
+function UsuariosPanel({usuarioAtual}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[form,setForm]=useState({nome:"",email:"",senha:""});
+  const[erro,setErro]=useState("");
+  const[confirmDel,setConfirmDel]=useState(null);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.usuarios();setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[]);
+
+  const adicionar=async()=>{
+    if(!form.nome||!form.email||!form.senha){setErro("Preencha todos os campos");return;}
+    if(form.senha.length<6){setErro("Senha mínima de 6 caracteres");return;}
+    setErro("");
+    const r=await DB.criarUsuario(form.nome,form.email,form.senha);
+    if(r.erro){setErro("E-mail já cadastrado");return;}
+    setShowForm(false);setForm({nome:"",email:"",senha:""});carregar();
+  };
+  const excluir=async()=>{
+    if(confirmDel===usuarioAtual.id){alert("Você não pode excluir sua própria conta.");return;}
+    await DB.delUsuario(confirmDel);setConfirmDel(null);carregar();
+  };
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div><div style={{fontSize:14,fontWeight:600}}>👥 Usuários do sistema</div><div style={{fontSize:12,color:C.gray}}>Gerencie quem pode acessar o FinGroup</div></div>
+        <button onClick={()=>setShowForm(v=>!v)} style={btnP}>+ Novo usuário</button>
+      </div>
+
+      {showForm&&(
+        <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+            <FormField label="Nome"><input value={form.nome} onChange={e=>setForm(f=>({...f,nome:e.target.value}))} style={inp}/></FormField>
+            <FormField label="E-mail"><input value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} type="email" style={inp}/></FormField>
+            <FormField label="Senha (mín. 6)"><input value={form.senha} onChange={e=>setForm(f=>({...f,senha:e.target.value}))} type="password" style={inp}/></FormField>
+          </div>
+          {erro&&<div style={{fontSize:12,color:C.red,marginBottom:8}}>⚠️ {erro}</div>}
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={adicionar} style={{...btnP,background:C.green}}>✅ Criar</button>
+            <button onClick={()=>{setShowForm(false);setErro("");}} style={btnS}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+        {loading?<div style={{padding:40,textAlign:"center"}}><Spinner/></div>:dados.length===0?<Empty/>:(
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead><tr style={{background:"#f9fafb"}}>{["Nome","E-mail","Cadastrado em","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 14px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:12}}>{h}</th>)}</tr></thead>
+            <tbody>{dados.map((u,i)=>(
+              <tr key={u.id} style={{borderBottom:"1px solid #f3f4f6",background:u.id===usuarioAtual.id?"#eff6ff":"#fff"}}>
+                <td style={{padding:"10px 14px",fontWeight:500,color:"#111827"}}>
+                  {u.nome} {u.id===usuarioAtual.id&&<span style={{fontSize:10,padding:"1px 6px",borderRadius:100,background:"#dbeafe",color:C.blueDk}}>você</span>}
+                </td>
+                <td style={{padding:"10px 14px",color:C.gray}}>{u.email}</td>
+                <td style={{padding:"10px 14px",color:C.gray,fontSize:12}}>{new Date(u.criado_em).toLocaleDateString("pt-BR")}</td>
+                <td style={{padding:"10px 14px"}}>
+                  {u.id!==usuarioAtual.id&&(
+                    confirmDel===u.id?(
+                      <div style={{display:"flex",gap:6}}>
+                        <button onClick={excluir} style={{padding:"4px 10px",borderRadius:6,background:C.red,border:"none",color:"#fff",fontSize:11,cursor:"pointer"}}>Confirmar</button>
+                        <button onClick={()=>setConfirmDel(null)} style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e5e7eb",background:"#fff",fontSize:11,cursor:"pointer"}}>Cancelar</button>
+                      </div>
+                    ):(
+                      <button onClick={()=>setConfirmDel(u.id)} style={{padding:"4px 10px",borderRadius:6,background:C.redL,border:"none",color:C.red,fontSize:11,cursor:"pointer"}}>🗑️ Remover</button>
+                    )
+                  )}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── OLIST SYNC PANEL ─────────────────────────────────────────────────────
+const OLIST_TOKEN_KEY="fingroup_olist_token_legacy";
+
+function OlistPanel({empresaId,empresaInfo}){
+  const token=empresaInfo?.olist_token||"";
+  const[step,setStep]=useState("idle");
+  const[loading,setLoading]=useState(false);
+  const[produtos,setProdutos]=useState([]);
+  const[pedidos,setPedidos]=useState([]);
+  const[selProd,setSelProd]=useState([]);
+  const[selPed,setSelPed]=useState([]);
+  const[msg,setMsg]=useState("");
+  const[erro,setErro]=useState("");
+  const[dataIni,setDataIni]=useState(new Date(Date.now()-30*86400000).toISOString().slice(0,10));
+  const[dataFim,setDataFim]=useState(new Date().toISOString().slice(0,10));
+  const[importLog,setImportLog]=useState([]);
+  const SITUACAO={0:"Aberta",1:"Faturada",2:"Cancelada",3:"Aprovada",4:"Prep. Envio",5:"Enviada",6:"Entregue",7:"Pronto Envio",9:"Não Entregue"};
+
+  const buscarProdutos=async()=>{
+    if(!token){setErro("Configure o token Olist na empresa (🏢 Gerenciar empresas → Editar)");return;}
+    if(!empresaId){setErro("Selecione uma empresa no menu lateral");return;}
+    setLoading(true);setErro("");setMsg("Buscando produtos no Olist...");
+    try{
+      const olistUrl="https://api.tiny.com.br/public-api/v3/produtos?limit=100&situacao=A";
+      const proxyUrl="https://corsproxy.io/?"+encodeURIComponent(olistUrl);
+      const res=await fetch(proxyUrl,{headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"}});
+      if(res.status===401){setErro("Token inválido. Atualize em 🏢 Gerenciar empresas.");setLoading(false);setMsg("");return;}
+      if(res.ok){
+        const data=await res.json();
+        const itens=(data?.itens||[]).map(p=>({sku:p.sku||p.codigo||"",nome:p.nome||p.descricao||"Produto",custo:Number(p.precoCusto||0),preco_venda:Number(p.precoVenda||0),quantidade:Number(p.saldoEstoque||0),venda_dia:0,lead_time:7,estoque_minimo:5,fornecedor:"Olist"}));
+        if(itens.length===0){setErro("Nenhum produto encontrado. Verifique o token e se há produtos ativos no Olist.");setLoading(false);setMsg("");return;}
+        setProdutos(itens);setSelProd(itens.map((_,i)=>i));setStep("produtos");setMsg(itens.length+" produtos encontrados.");
+      }else{
+        const err=await res.json().catch(()=>({}));
+        setErro("Erro ao buscar produtos: "+(err.error||res.status));
+      }
+    }catch(e){
+      setErro("Erro de conexão: "+e.message+". Verifique se o token está correto.");
+    }
+    setLoading(false);
+  };
+
+  const buscarVendas=async()=>{
+    if(!token||!empresaId)return;
+    setLoading(true);setErro("");setMsg("Buscando pedidos no Olist...");
+    try{
+      const params=new URLSearchParams({limit:100,orderBy:"desc",dataInicial:dataIni,dataFinal:dataFim});
+      // API v2 Olist — pedidos por período
+      const olistUrl="https://api.tiny.com.br/api2/pedidos.pesquisa.php?token="+token+"&formato=json&dataInicial="+dataIni+"&dataFinal="+dataFim;
+      const proxyUrl="https://corsproxy.io/?"+encodeURIComponent(olistUrl);
+      const res=await fetch(proxyUrl);
+      if(res.ok){
+        const data=await res.json();
+        if(data?.retorno?.status==="Erro"){
+          const msg=data?.retorno?.erros?.[0]?.erro||"Erro";
+          setErro("Olist retornou erro: "+msg);setLoading(false);setMsg("");return;
+        }
+        const rawPedidos=data?.retorno?.pedidos||[];
+        const itens=rawPedidos.map(p=>{
+          const pd=p.pedido||p;
+          return{
+            numeroPedido:pd.numero||pd.id||"",
+            dataCriacao:pd.data_pedido||pd.dataPedido||dataFim,
+            situacao:pd.situacao||pd.status||"",
+            cliente:{nome:pd.nome_contato||pd.cliente?.nome||"Cliente"},
+            valor:pd.valor||pd.total_pedido||"0",
+            ecommerce:{canalVenda:pd.forma_envio||pd.canal||"Olist"}
+          };
+        });
+        setPedidos(itens);setSelPed(itens.map((_,i)=>i));setStep("vendas");
+        setMsg(itens.length+" pedidos encontrados.");
+      }else{
+        setErro("Erro ao buscar pedidos: "+res.status);
+      }
+    }catch(e){
+      setErro("Erro de conexão: "+e.message);
+    }
+    setLoading(false);
+  };
+
+  const importarProdutos=async()=>{
+    if(!empresaId)return;
+    setLoading(true);setMsg("Importando produtos...");
+    const logs=[];
+    for(const i of selProd){const p=produtos[i];try{await DB.saveEstoque({...p,empresa_id:empresaId});logs.push("✅ "+p.nome+" ("+( p.sku||"sem SKU")+")");}catch{logs.push("❌ Erro: "+p.nome);}}
+    setImportLog(logs);setLoading(false);setMsg(selProd.length+" produto(s) importados!");setStep("done");
+  };
+
+  const importarVendas=async()=>{
+    if(!empresaId)return;
+    setLoading(true);setMsg("Importando pedidos...");
+    const logs=[];
+    const existentes=await DB.receber(empresaId);
+    const pedidosExist=new Set(existentes.map(c=>c.pedido).filter(Boolean));
+    for(const i of selPed){
+      const p=pedidos[i];const numPed="#"+p.numeroPedido;
+      if(pedidosExist.has(numPed)){logs.push("⏭️ Já importado: "+numPed);continue;}
+      const dt=new Date(p.dataCriacao||Date.now());dt.setDate(dt.getDate()+30);
+      const status=p.situacao===6?"Recebido":p.situacao===2?"Cancelado":"Em aberto";
+      try{await DB.saveReceber({empresa_id:empresaId,cliente:p.cliente?.nome||"Cliente Olist",pedido:numPed,vencimento:dt.toISOString().slice(0,10),valor:parseFloat(p.valor||0),status,origem:"Olist · "+(p.ecommerce?.canalVenda||"—")});logs.push("✅ Pedido "+numPed+" — "+(p.cliente?.nome||"Cliente")+" — R$ "+p.valor);}
+      catch{logs.push("❌ Erro no pedido "+numPed);}
+    }
+    setImportLog(logs);setLoading(false);setMsg(selPed.length+" pedido(s) importados!");setStep("done");
+  };
+
+  const tog=(arr,set,i)=>set(prev=>prev.includes(i)?prev.filter(x=>x!==i):[...prev,i]);
+  const selAll=(arr,set)=>set(arr.map((_,i)=>i));
+  const clrAll=(set)=>set([]);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* HEADER */}
+      <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:40,height:40,borderRadius:10,background:"#fff0cc",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>🛒</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>Integração Olist ERP</div>
+            <div style={{fontSize:12,color:C.gray}}>{empresaInfo?.nome?"Empresa: "+empresaInfo.nome:"Selecione uma empresa no menu lateral"}</div>
+          </div>
+          {token?<span style={{fontSize:11,padding:"3px 10px",borderRadius:100,background:C.greenL,color:"#166534",fontWeight:600}}>🔌 Token configurado</span>
+               :<span style={{fontSize:11,padding:"3px 10px",borderRadius:100,background:C.amberL,color:"#92400e",fontWeight:600}}>⚠️ Sem token</span>}
+        </div>
+        {msg&&<div style={{marginTop:10,padding:"8px 12px",background:"#eff6ff",borderRadius:8,fontSize:12,color:C.blueDk}}>{msg}</div>}
+        {erro&&<div style={{marginTop:10,padding:"8px 12px",background:C.redL,borderRadius:8,fontSize:12,color:C.red}}>⚠️ {erro}</div>}
+      </div>
+
+      {/* SEM TOKEN */}
+      {!token&&(
+        <div style={{background:C.amberL,border:"1px solid #fde68a",borderRadius:12,padding:16}}>
+          <div style={{fontSize:13,fontWeight:600,color:"#92400e",marginBottom:8}}>⚠️ Token Olist não configurado para {empresaInfo?.nome||"esta empresa"}</div>
+          <div style={{fontSize:12,color:"#92400e",display:"flex",flexDirection:"column",gap:3}}>
+            <span>1. Vá em <strong>🏢 Gerenciar empresas</strong> no menu</span>
+            <span>2. Clique em <strong>✏️ Editar</strong> na empresa desejada</span>
+            <span>3. Cole o token Bearer no campo <strong>Token Olist</strong> e salve</span>
+            <span>4. Volte aqui — o token é carregado automaticamente</span>
+          </div>
+        </div>
+      )}
+
+      {!empresaId&&<div style={{background:C.amberL,border:"1px solid #fde68a",borderRadius:12,padding:14,fontSize:12,color:"#92400e"}}>⚠️ Selecione uma empresa específica no menu lateral.</div>}
+
+      {/* PRODUTOS */}
+      <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:step==="produtos"?14:0}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:600}}>📦 Importar produtos → Estoque</div>
+            <div style={{fontSize:11,color:C.gray}}>SKU, nome, custo, preço de venda e quantidade</div>
+          </div>
+          <button onClick={buscarProdutos} disabled={loading||!token||!empresaId} style={{...btnP,opacity:!token||!empresaId?.5:1,whiteSpace:"nowrap"}}>
+            {loading&&step==="produtos"?"Buscando...":"🔍 Buscar produtos"}
+          </button>
+        </div>
+        {step==="produtos"&&produtos.length>0&&(
+          <div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+              <span style={{fontSize:12}}><strong>{produtos.length} produtos</strong> — selecione para importar:</span>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>selAll(produtos,setSelProd)} style={{...btnS,fontSize:11,padding:"4px 10px"}}>Todos</button>
+                <button onClick={()=>clrAll(setSelProd)} style={{...btnS,fontSize:11,padding:"4px 10px"}}>Limpar</button>
+              </div>
+            </div>
+            <div style={{maxHeight:260,overflowY:"auto",border:"1px solid #f3f4f6",borderRadius:8,marginBottom:12}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead style={{position:"sticky",top:0,background:"#f9fafb"}}>
+                  <tr>{["","SKU","Nome","Custo","Preço Venda","Estoque"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"8px 10px",color:C.gray,fontWeight:500,fontSize:11,borderBottom:"1px solid #e5e7eb"}}>{h}</th>)}</tr>
+                </thead>
+                <tbody>{produtos.map((p,i)=>{const sel=selProd.includes(i);return(
+                  <tr key={i} onClick={()=>tog(produtos,setSelProd,i)} style={{borderBottom:"1px solid #f3f4f6",background:sel?"#eff6ff":"#fff",cursor:"pointer"}}>
+                    <td style={{padding:"8px 10px"}}><div style={{width:16,height:16,borderRadius:4,border:sel?"none":"1.5px solid #d1d5db",background:sel?C.blue:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>{sel&&<span style={{color:"#fff",fontSize:10}}>✓</span>}</div></td>
+                    <td style={{padding:"8px 10px",color:C.gray,fontFamily:"monospace",fontSize:11}}>{p.sku||"—"}</td>
+                    <td style={{padding:"8px 10px",fontWeight:500,color:"#374151"}}>{p.nome}</td>
+                    <td style={{padding:"8px 10px",color:C.red,fontWeight:600}}>{fmtBRL(p.custo)}</td>
+                    <td style={{padding:"8px 10px",color:C.green,fontWeight:600}}>{fmtBRL(p.preco_venda)}</td>
+                    <td style={{padding:"8px 10px"}}>{p.quantidade} un.</td>
+                  </tr>
+                );})}</tbody>
+              </table>
+            </div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span style={{fontSize:12}}><strong>{selProd.length}</strong> selecionados</span>
+              <button onClick={importarProdutos} disabled={loading||selProd.length===0} style={{...btnP,background:C.green,opacity:selProd.length===0?.5:1}}>
+                {loading?"Importando...":"✅ Importar "+selProd.length+" produto(s)"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* VENDAS */}
+      <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:600}}>💰 Importar vendas → Contas a Receber</div>
+            <div style={{fontSize:11,color:C.gray}}>Pedidos faturados viram contas a receber no Supabase</div>
+          </div>
+          <button onClick={buscarVendas} disabled={loading||!token||!empresaId} style={{...btnP,opacity:!token||!empresaId?.5:1,whiteSpace:"nowrap"}}>
+            {loading&&step==="vendas"?"Buscando...":"🔍 Buscar vendas"}
+          </button>
+        </div>
+        <div style={{display:"flex",gap:10,alignItems:"flex-end",marginBottom:step==="vendas"&&pedidos.length>0?12:0}}>
+          <div><div style={{fontSize:11,color:C.gray,marginBottom:4}}>Data inicial</div><input type="date" value={dataIni} onChange={e=>setDataIni(e.target.value)} style={{...inp,width:145}}/></div>
+          <div><div style={{fontSize:11,color:C.gray,marginBottom:4}}>Data final</div><input type="date" value={dataFim} onChange={e=>setDataFim(e.target.value)} style={{...inp,width:145}}/></div>
+          {step==="vendas"&&<button onClick={buscarVendas} style={{...btnS,fontSize:12}}>🔄 Atualizar</button>}
+        </div>
+        {step==="vendas"&&pedidos.length>0&&(
+          <div style={{marginTop:12}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+              <span style={{fontSize:12}}><strong>{pedidos.length} pedidos</strong> encontrados:</span>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>selAll(pedidos,setSelPed)} style={{...btnS,fontSize:11,padding:"4px 10px"}}>Todos</button>
+                <button onClick={()=>clrAll(setSelPed)} style={{...btnS,fontSize:11,padding:"4px 10px"}}>Limpar</button>
+              </div>
+            </div>
+            <div style={{maxHeight:260,overflowY:"auto",border:"1px solid #f3f4f6",borderRadius:8,marginBottom:12}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead style={{position:"sticky",top:0,background:"#f9fafb"}}>
+                  <tr>{["","Pedido","Data","Cliente","Canal","Valor","Situação"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"8px 10px",color:C.gray,fontWeight:500,fontSize:11,borderBottom:"1px solid #e5e7eb",whiteSpace:"nowrap"}}>{h}</th>)}</tr>
+                </thead>
+                <tbody>{pedidos.map((p,i)=>{
+                  const sel=selPed.includes(i);const sit=SITUACAO[p.situacao]||"—";const sitColor=p.situacao===6?C.green:p.situacao===2?C.red:C.amber;
+                  return(<tr key={i} onClick={()=>tog(pedidos,setSelPed,i)} style={{borderBottom:"1px solid #f3f4f6",background:sel?"#eff6ff":"#fff",cursor:"pointer"}}>
+                    <td style={{padding:"8px 10px"}}><div style={{width:16,height:16,borderRadius:4,border:sel?"none":"1.5px solid #d1d5db",background:sel?C.blue:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>{sel&&<span style={{color:"#fff",fontSize:10}}>✓</span>}</div></td>
+                    <td style={{padding:"8px 10px",color:C.blue,fontWeight:600}}>#{p.numeroPedido}</td>
+                    <td style={{padding:"8px 10px",color:C.gray,whiteSpace:"nowrap"}}>{p.dataCriacao?.slice(0,10).split("-").reverse().join("/")}</td>
+                    <td style={{padding:"8px 10px",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.cliente?.nome||"—"}</td>
+                    <td style={{padding:"8px 10px"}}><span style={{fontSize:10,padding:"2px 6px",borderRadius:100,background:"#f3f4f6",color:C.gray}}>{p.ecommerce?.canalVenda||"—"}</span></td>
+                    <td style={{padding:"8px 10px",fontWeight:600,color:p.situacao===2?C.gray:C.green}}>{fmtBRL(p.valor)}</td>
+                    <td style={{padding:"8px 10px"}}><span style={{fontSize:10,padding:"2px 7px",borderRadius:100,background:sitColor+"20",color:sitColor,fontWeight:600}}>{sit}</span></td>
+                  </tr>);
+                })}</tbody>
+              </table>
+            </div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{fontSize:12}}><strong>{selPed.length}</strong> selecionados · Total: <strong style={{color:C.green}}>{fmtBRL(pedidos.filter((_,i)=>selPed.includes(i)).reduce((s,p)=>s+parseFloat(p.valor||0),0))}</strong></div>
+              <button onClick={importarVendas} disabled={loading||selPed.length===0} style={{...btnP,background:C.green,opacity:selPed.length===0?.5:1}}>
+                {loading?"Importando...":"✅ Importar "+selPed.length+" pedido(s)"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* LOG */}
+      {step==="done"&&importLog.length>0&&(
+        <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}}>
+          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>📋 Resultado da importação</div>
+          <div style={{maxHeight:200,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
+            {importLog.map((l,i)=><div key={i} style={{fontSize:12,padding:"4px 8px",borderRadius:6,background:l.startsWith("✅")?"#f0fdf4":l.startsWith("⏭️")?"#f9fafb":"#fff9f9",color:l.startsWith("✅")?"#166534":l.startsWith("⏭️")?C.gray:"#991b1b"}}>{l}</div>)}
+          </div>
+          <button onClick={()=>{setStep("idle");setProdutos([]);setPedidos([]);setImportLog([]);setMsg("");}} style={{...btnS,marginTop:12}}>🔄 Nova importação</button>
+        </div>
+      )}
+    </div>
+  );
+}
+// ── APP PRINCIPAL ─────────────────────────────────────────────────────────
+const NAV=[
+  {id:"dashboard",label:"Dashboard",icon:"📊",group:"Visão geral"},
+  {id:"fluxo",label:"Fluxo de caixa",icon:"💸",group:"Financeiro"},
+  {id:"receber",label:"Contas a receber",icon:"📥",group:"Financeiro"},
+  {id:"pagar",label:"Contas a pagar",icon:"📤",group:"Financeiro"},
+  {id:"estoque",label:"Estoque",icon:"📦",group:"Operacional"},
+  {id:"devolucoes",label:"Devoluções",icon:"🔄",group:"Operacional"},
+  {id:"contatos",label:"Clientes/Fornecedores",icon:"👥",group:"Cadastros"},
+  {id:"olist",label:"Importar Olist",icon:"🛒",group:"Integrações"},
+  {id:"empresas",label:"Gerenciar empresas",icon:"🏢",group:"Configurações"},
+  {id:"usuarios",label:"Usuários",icon:"🔑",group:"Configurações"},
+];
+
+function AppWrapper(){
+  const[usuario,setUsuario]=useState(null);
+  if(!usuario)return<Login onLogin={setUsuario}/>;
+  return<App usuario={usuario} onLogout={()=>{localStorage.removeItem("fg_user");setUsuario(null);}}/>;
+}
+
+function App({usuario,onLogout}){
+  const[active,setActive]=useState("dashboard");
+  const[empresas,setEmpresas]=useState({});
+  const[empresaAtiva,setEmpresaAtiva]=useState("grupo");
+  const[loadingEmpresas,setLoadingEmpresas]=useState(true);
+
+  const carregarEmpresas=async()=>{
+    const lista=await DB.empresas();
+    const map={};
+    lista.forEach(e=>{map[e.id]={...e,cor:e.cor||C.blue,icon:e.icon||"🏢"};});
+    setEmpresas(map);
+    setLoadingEmpresas(false);
+  };
+  useEffect(()=>{carregarEmpresas();},[]);
+
+  const isGrupo=empresaAtiva==="grupo";
+  const empresaInfo=isGrupo?null:empresas[empresaAtiva];
+  const empresaId=isGrupo?null:empresaAtiva;
+  const grupos=[...new Set(NAV.map(n=>n.group))];
+
+  const panels={
+    dashboard:<Dashboard empresaId={empresaId} empresas={empresas}/>,
+    fluxo:<FluxoPanel empresaId={empresaId}/>,
+    receber:<ContasReceberPanel empresaId={empresaId}/>,
+    pagar:<ContasPagarPanel empresaId={empresaId}/>,
+    estoque:<EstoquePanel empresaId={empresaId}/>,
+    devolucoes:<DevolucoesPanel empresaId={empresaId}/>,
+    contatos:<ContatosPanel empresaId={empresaId}/>,
+    olist:<OlistPanel empresaId={empresaId} empresaInfo={empresaInfo}/>,
+    empresas:<EmpresasPanel onReload={carregarEmpresas}/>,
+    usuarios:<UsuariosPanel usuarioAtual={usuario}/>,
+  };
+
+  const cur=NAV.find(n=>n.id===active);
+
+  if(loadingEmpresas)return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#1e40af,#7c3aed)"}}>
+      <div style={{textAlign:"center",color:"#fff"}}>
+        <div style={{fontSize:40,marginBottom:10}}>🏦</div>
+        <div style={{fontSize:16,fontWeight:600}}>Carregando FinGroup...</div>
+        <div style={{fontSize:13,opacity:.8,marginTop:4}}>Conectando ao banco de dados</div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{display:"flex",height:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f9fafb"}}>
+      {/* SIDEBAR */}
+      <div style={{width:228,background:"#fff",borderRight:"1px solid #e5e7eb",display:"flex",flexDirection:"column",flexShrink:0,overflowY:"auto"}}>
+        <div style={{padding:"14px 16px 10px",borderBottom:"1px solid #f3f4f6"}}>
+          <div style={{fontSize:15,fontWeight:700,color:"#111827"}}>🏦 FinGroup</div>
+          <div style={{fontSize:11,color:"#9ca3af",marginTop:1}}>Gestão financeira</div>
+        </div>
+
+        {/* Seletor empresa */}
+        <div style={{padding:"10px 12px",borderBottom:"1px solid #f3f4f6"}}>
+          <div style={{fontSize:10,color:"#9ca3af",fontWeight:600,textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>Empresa ativa</div>
+          <button onClick={()=>setEmpresaAtiva("grupo")} style={{width:"100%",padding:"7px 10px",borderRadius:8,border:`1px solid ${isGrupo?C.blue:"#e5e7eb"}`,background:isGrupo?"#eff6ff":"#fff",color:isGrupo?C.blue:"#374151",fontSize:12,fontWeight:isGrupo?700:400,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+            <span style={{fontSize:14}}>🌐</span>
+            <div><div style={{fontSize:12,lineHeight:1.2}}>Grupo Consolidado</div><div style={{fontSize:10,opacity:.7}}>{Object.keys(empresas).length} empresas</div></div>
+          </button>
+          {Object.values(empresas).map(emp=>{
+            const at=empresaAtiva===emp.id;
+            return(
+              <button key={emp.id} onClick={()=>setEmpresaAtiva(emp.id)} style={{width:"100%",padding:"7px 10px",borderRadius:8,marginBottom:4,border:`1px solid ${at?emp.cor:"#e5e7eb"}`,background:at?emp.cor+"12":"#fff",color:at?emp.cor:"#374151",fontSize:12,fontWeight:at?700:400,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:6}}>
+                <span style={{fontSize:14}}>{emp.icon}</span>
+                <div><div style={{fontSize:12,lineHeight:1.2}}>{emp.nome}</div><div style={{fontSize:10,opacity:.6}}>{emp.cnpj||"—"}</div></div>
+              </button>
+            );
+          })}
+        </div>
+
+        <nav style={{flex:1,padding:"8px 0"}}>
+          {grupos.map(g=>(
+            <div key={g}>
+              <div style={{padding:"10px 14px 4px",fontSize:10,color:"#9ca3af",fontWeight:600,textTransform:"uppercase",letterSpacing:.8}}>{g}</div>
+              {NAV.filter(n=>n.group===g).map(n=>(
+                <button key={n.id} onClick={()=>setActive(n.id)} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",fontSize:13,width:"100%",textAlign:"left",border:"none",cursor:"pointer",background:active===n.id?"#eff6ff":"transparent",color:active===n.id?C.blue:"#6b7280",fontWeight:active===n.id?600:400,borderLeft:active===n.id?`2px solid ${C.blue}`:"2px solid transparent",transition:"all .12s"}}>
+                  <span style={{fontSize:15}}>{n.icon}</span>{n.label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+
+        {/* Info usuário */}
+        <div style={{padding:"10px 14px",borderTop:"1px solid #f3f4f6",display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:28,height:28,borderRadius:"50%",background:C.blueL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:C.blueDk,flexShrink:0}}>{usuario.nome?.[0]?.toUpperCase()}</div>
+          <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,color:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{usuario.nome}</div><div style={{fontSize:10,color:"#9ca3af",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{usuario.email}</div></div>
+          <button onClick={onLogout} title="Sair" style={{background:"none",border:"none",cursor:"pointer",fontSize:16,color:C.gray}}>🚪</button>
+        </div>
+      </div>
+
+      {/* MAIN */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        {/* TOPBAR */}
+        <div style={{background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"10px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            {empresaInfo&&<div style={{width:28,height:28,borderRadius:8,background:empresaInfo.cor+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{empresaInfo.icon}</div>}
+            {isGrupo&&<div style={{width:28,height:28,borderRadius:8,background:"#ede9fe",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🌐</div>}
+            <div>
+              <span style={{fontSize:15,fontWeight:700,color:"#111827"}}>{cur?.icon} {cur?.label}</span>
+              <span style={{marginLeft:8,fontSize:11,padding:"2px 8px",borderRadius:100,background:isGrupo?"#ede9fe":(empresaInfo?.cor+"15"),color:isGrupo?C.purple:empresaInfo?.cor,fontWeight:600}}>
+                {isGrupo?"🌐 Grupo Consolidado":`${empresaInfo?.icon} ${empresaInfo?.nome}`}
+              </span>
+            </div>
+          </div>
+          {isGrupo&&active!=="dashboard"&&active!=="empresas"&&active!=="usuarios"&&(
+            <div style={{fontSize:12,color:C.purple,background:"#ede9fe",padding:"6px 14px",borderRadius:8}}>
+              🌐 Modo grupo — selecione uma empresa para editar
+            </div>
+          )}
+        </div>
+
+        {/* CONTENT */}
+        <div style={{flex:1,overflowY:"auto",padding:24}} key={empresaAtiva+active}>
+          {panels[active]||<Empty msg="Painel em construção"/>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const root=ReactDOM.createRoot(document.getElementById("root"));
+root.render(<AppWrapper/>);
+</script>
+</body>
+</html>
