@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>FinGroup — Gestão Financeira</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#f9fafb;color:#111827}
+input,select,textarea,button{font-family:inherit;outline:none}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:#f1f1f1}
+::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+
+
+
+
+const {useState,useEffect,useRef,useCallback}=React;
+
+const SB_URL="https://nikrcrxfjwelfxxglkai.supabase.co";
+const SB_KEY="sb_publishable_cVPmLWrcpzcmxOAsqY4aiw_uu8SbdAQ";
+const sb=supabase.createClient(SB_URL,SB_KEY);
+
+const C={
+  blue:"#2563eb",blueL:"#dbeafe",blueDk:"#1e40af",
+  green:"#16a34a",greenL:"#dcfce7",
+  red:"#dc2626",redL:"#fee2e2",
+  amber:"#d97706",amberL:"#fef3c7",
+  gray:"#6b7280",grayL:"#f3f4f6",
+  purple:"#7c3aed",purpleL:"#ede9fe",
+};
+
+const DB={
+  empresas:async()=>{const{data}=await sb.from("empresas").select("*").order("criado_em");return data||[]},
+  saveEmpresa:async(e)=>{
+    const p={nome:e.nome,cnpj:e.cnpj,cor:e.cor||C.blue,icon:e.icon||"🏢",segmento:e.segmento||"Comércio",regime:e.regime||"Simples Nacional",olist_token:e.olist_token||null};
+    if(e.id){const{data}=await sb.from("empresas").update(p).eq("id",e.id).select().single();return data;}
+    else{const{data}=await sb.from("empresas").insert(p).select().single();return data;}
+  },
+  delEmpresa:async(id)=>await sb.from("empresas").delete().eq("id",id),
+
+  receber:async(eid)=>{let q=sb.from("contas_receber").select("*").order("criado_em",{ascending:false});if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveReceber:async(c)=>{
+    const p={empresa_id:c.empresa_id,cliente:c.cliente,pedido:c.pedido||null,vencimento:c.vencimento||null,valor:Number(c.valor)||0,status:c.status||"Em aberto",origem:c.origem||"Manual",canal:c.canal||null};
+    if(c.id){const{data}=await sb.from("contas_receber").update(p).eq("id",c.id).select().single();return data;}
+    else{const{data}=await sb.from("contas_receber").insert(p).select().single();return data;}
+  },
+  delReceber:async(id)=>await sb.from("contas_receber").delete().eq("id",id),
+
+  pagar:async(eid)=>{let q=sb.from("contas_pagar").select("*").order("criado_em",{ascending:false});if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  savePagar:async(c)=>{
+    const p={
+      empresa_id:c.empresa_id,fornecedor:c.fornecedor,categoria:c.categoria||"Outros",
+      vencimento:c.vencimento||null,valor:Number(c.valor)||0,status:c.status||"Em aberto",
+      documento:c.documento||null,observacoes:c.observacoes||null,
+      competencia:c.competencia||null,
+      parcela_atual:Number(c.parcela_atual)||1,
+      total_parcelas:Number(c.total_parcelas)||1,
+      fixo:c.fixo||false,
+      grupo_parcela:c.grupo_parcela||null,
+      conta_bancaria_id:c.conta_bancaria_id||null,
+    };
+    if(c.id){const{data}=await sb.from("contas_pagar").update(p).eq("id",c.id).select().single();return data;}
+    else{const{data}=await sb.from("contas_pagar").insert(p).select().single();return data;}
+  },
+  delPagar:async(id)=>await sb.from("contas_pagar").delete().eq("id",id),
+  delPagarGrupo:async(grupo)=>await sb.from("contas_pagar").delete().eq("grupo_parcela",grupo),
+
+  contasBancarias:async(eid)=>{let q=sb.from("contas_bancarias").select("*").order("nome");if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveContaBancaria:async(c)=>{
+    const p={empresa_id:c.empresa_id,nome:c.nome,tipo:c.tipo||"corrente",banco:c.banco||null,ultimos_digitos:c.ultimos_digitos||null,limite:Number(c.limite)||0,dia_fechamento:Number(c.dia_fechamento)||null,dia_vencimento:Number(c.dia_vencimento)||null,cor:c.cor||"#2563eb",ativo:c.ativo!==false};
+    if(c.id){const{data}=await sb.from("contas_bancarias").update(p).eq("id",c.id).select().single();return data;}
+    else{const{data}=await sb.from("contas_bancarias").insert(p).select().single();return data;}
+  },
+  delContaBancaria:async(id)=>await sb.from("contas_bancarias").delete().eq("id",id),
+
+  fluxo:async(eid)=>{let q=sb.from("fluxo_caixa").select("*").order("data",{ascending:false});if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveFluxo:async(f)=>{
+    const p={empresa_id:f.empresa_id,data:f.data,descricao:f.descricao,categoria:f.categoria||null,tipo:f.tipo,valor:Number(f.valor)||0};
+    if(f.id){const{data}=await sb.from("fluxo_caixa").update(p).eq("id",f.id).select().single();return data;}
+    else{const{data}=await sb.from("fluxo_caixa").insert(p).select().single();return data;}
+  },
+  delFluxo:async(id)=>await sb.from("fluxo_caixa").delete().eq("id",id),
+
+  estoque:async(eid)=>{let q=sb.from("estoque").select("*").order("nome");if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveEstoque:async(e)=>{
+    const p={empresa_id:e.empresa_id,sku:e.sku||null,nome:e.nome,custo:Number(e.custo)||0,preco_venda:Number(e.preco_venda)||0,quantidade:Number(e.quantidade)||0,venda_dia:Number(e.venda_dia)||0,lead_time:Number(e.lead_time)||7,estoque_minimo:Number(e.estoque_minimo)||10,fornecedor:e.fornecedor||null};
+    if(e.id){const{data}=await sb.from("estoque").update(p).eq("id",e.id).select().single();return data;}
+    else{const{data}=await sb.from("estoque").insert(p).select().single();return data;}
+  },
+  delEstoque:async(id)=>await sb.from("estoque").delete().eq("id",id),
+
+  devolucoes:async(eid)=>{let q=sb.from("devolucoes").select("*").order("criado_em",{ascending:false});if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveDevolvucao:async(d)=>{
+    const p={empresa_id:d.empresa_id,codigo:d.codigo||null,data:d.data||new Date().toISOString().slice(0,10),cliente:d.cliente,pedido:d.pedido||null,produto:d.produto,quantidade:Number(d.quantidade)||1,valor_venda:Number(d.valor_venda)||0,reembolso:Number(d.reembolso)||0,motivo:d.motivo||null,destino:d.destino||"Análise técnica",status:d.status||"Em análise",observacoes:d.observacoes||null,origem:d.origem||"Manual",ml_claim_id:d.ml_claim_id||null};
+    if(d.id){const{data}=await sb.from("devolucoes").update(p).eq("id",d.id).select().single();return data;}
+    else{const{data}=await sb.from("devolucoes").insert(p).select().single();return data;}
+  },
+  delDevolucao:async(id)=>await sb.from("devolucoes").delete().eq("id",id),
+
+  contatos:async(eid)=>{let q=sb.from("contatos").select("*").order("nome");if(eid)q=q.eq("empresa_id",eid);const{data}=await q;return data||[]},
+  saveContato:async(c)=>{
+    const p={empresa_id:c.empresa_id,nome:c.nome,tipo:c.tipo||"Cliente",cnpj_cpf:c.cnpj_cpf||null,cidade:c.cidade||null,status:c.status||"Ativo"};
+    if(c.id){const{data}=await sb.from("contatos").update(p).eq("id",c.id).select().single();return data;}
+    else{const{data}=await sb.from("contatos").insert(p).select().single();return data;}
+  },
+  delContato:async(id)=>await sb.from("contatos").delete().eq("id",id),
+
+  loginUsuario:async(email,senha)=>{
+    const{data}=await sb.from("usuarios").select("*").eq("email",email.toLowerCase()).single();
+    if(!data)return{erro:"Usuário não encontrado"};
+    if(data.senha_hash!==btoa(senha+"_fg25"))return{erro:"Senha incorreta"};
+    return{usuario:data};
+  },
+  criarUsuario:async(nome,email,senha)=>{
+    const{data,error}=await sb.from("usuarios").insert({nome,email:email.toLowerCase(),senha_hash:btoa(senha+"_fg25"),papel:"usuario"}).select().single();
+    if(error)return{erro:error.message};
+    return{usuario:data};
+  },
+  usuarios:async()=>{const{data}=await sb.from("usuarios").select("id,nome,email,papel,criado_em").order("nome");return data||[]},
+  delUsuario:async(id)=>await sb.from("usuarios").delete().eq("id",id),
+};
+
+const fmtBRL=(v)=>"R$ "+(Number(v)||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtDate=(d)=>{if(!d)return"—";try{return new Date(d+"T00:00:00").toLocaleDateString("pt-BR")}catch{return d}};
+const fmtComp=(c)=>{if(!c)return"—";const p=c.split("-");return p.length===2?p[1].padStart(2,"0")+"/"+p[0]:c;};
+const toISO=(s)=>{if(!s||s==="—")return null;const p=s.split("/");if(p.length===3)return`${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;return s};
+
+function Spinner(){returnReact.createElement('div',{style:{width:20,height:20,border:"3px solid #e5e7eb",borderTop:"3px solid "+C.blue,borderRadius:"50%",animation:"spin .7s linear infinite"}})}
+function Empty({msg="Nenhum registro encontrado."}){returnReact.createElement('div',{style:{padding:40,textAlign:"center",color:"#9ca3af",fontSize:13}},msg)}
+
+function Badge({children,type="blue"}){
+  const s={blue:{bg:C.blueL,c:C.blueDk},green:{bg:C.greenL,c:"#166534"},red:{bg:C.redL,c:"#991b1b"},amber:{bg:C.amberL,c:"#92400e"},purple:{bg:C.purpleL,c:"#5b21b6"},gray:{bg:C.grayL,c:"#374151"}}[type]||{bg:C.blueL,c:C.blueDk};
+  returnReact.createElement('span',{style:{background:s.bg,color:s.c,fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:100}},children);
+}
+
+function KPI({label,value,sub,color}){
+  return(
+    React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"14px 16px"}},React.createElement('div',{style:{fontSize:12,color:C.gray,fontWeight:500,marginBottom:4}},label),React.createElement('div',{style:{fontSize:20,fontWeight:700,color:color||"#111827",letterSpacing:-0.5}},value),sub&&React.createElement('div',{style:{fontSize:11,color:C.gray,marginTop:2}},sub))
+  );
+}
+
+function Modal({title,onClose,children,width=520}){
+  return(
+    React.createElement('div',{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}},React.createElement('div',{style:{background:"#fff",borderRadius:16,padding:24,width,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 25px 80px rgba(0,0,0,0.2)",animation:"fadeIn .25s ease"}},React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}},React.createElement('div',{style:{fontSize:15,fontWeight:700,color:"#111827"}},title),React.createElement('button',{onClick:onClose,style:{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.gray,lineHeight:1}},"×")),children))
+  );
+}
+
+function FormField({label,children}){
+  returnReact.createElement('div',null,React.createElement('div',{style:{fontSize:11,color:C.gray,marginBottom:4,fontWeight:500}},label),children);
+}
+const inp={width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid #e5e7eb",fontSize:13,color:"#374151",background:"#fff",boxSizing:"border-box"};
+const btnP={padding:"9px 18px",borderRadius:9,background:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"};
+const btnS={padding:"9px 14px",borderRadius:9,border:"1px solid #e5e7eb",background:"#fff",fontSize:13,color:C.gray,cursor:"pointer"};
+
+function Login({onLogin}){
+  const[email,setEmail]=useState("");
+  const[senha,setSenha]=useState("");
+  const[nome,setNome]=useState("");
+  const[modo,setModo]=useState("check");
+  const[erro,setErro]=useState("");
+  const[loading,setLoading]=useState(false);
+
+  useEffect(()=>{
+    const s=localStorage.getItem("fg_user");
+    if(s){try{onLogin(JSON.parse(s))}catch{}}
+    DB.usuarios().then(u=>{setModo(u.length===0?"novo":"login")});
+  },[]);
+
+  const entrar=async()=>{
+    if(!email||!senha){setErro("Preencha todos os campos");return;}
+    setLoading(true);setErro("");
+    const r=await DB.loginUsuario(email,senha);
+    if(r.erro){setErro(r.erro);setLoading(false);return;}
+    localStorage.setItem("fg_user",JSON.stringify(r.usuario));
+    onLogin(r.usuario);
+  };
+
+  const criar=async()=>{
+    if(!nome||!email||!senha){setErro("Preencha todos os campos");return;}
+    if(senha.length<6){setErro("Senha mínima de 6 caracteres");return;}
+    setLoading(true);setErro("");
+    const r=await DB.criarUsuario(nome,email,senha);
+    if(r.erro){setErro("Email já cadastrado");setLoading(false);return;}
+    localStorage.setItem("fg_user",JSON.stringify(r.usuario));
+    onLogin(r.usuario);
+  };
+
+  if(modo==="check")return(
+    React.createElement('div',{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#1e40af,#7c3aed)"}},React.createElement('div',{style:{color:"#fff",fontSize:15}},"Conectando..."))
+  );
+
+  const isNovo=modo==="novo"||modo==="cadastro";
+  return(
+    React.createElement('div',{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#1e40af,#7c3aed)"}},React.createElement('div',{style:{background:"#fff",borderRadius:20,padding:40,width:380,boxShadow:"0 25px 80px rgba(0,0,0,0.25)",animation:"fadeIn .4s ease"}},React.createElement('div',{style:{textAlign:"center",marginBottom:28}},React.createElement('div',{style:{fontSize:40,marginBottom:6}},"🏦"),React.createElement('div',{style:{fontSize:22,fontWeight:700}},"FinGroup"),React.createElement('div',{style:{fontSize:13,color:C.gray,marginTop:4}},isNovo?"Criar conta de acesso":"Acesse sua conta"),modo==="novo"&&React.createElement('div',{style:{marginTop:10,padding:"8px 12px",background:"#eff6ff",borderRadius:8,fontSize:12,color:C.blueDk}},"👋 Primeiro acesso — configure seu usuário.")),React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:12}},isNovo&&React.createElement(FormField,{label:"Nome completo"},React.createElement('input',{value:nome,onChange:e=>setNome(e.target.value),placeholder:"Seu nome",style:inp})),React.createElement(FormField,{label:"E-mail"},React.createElement('input',{value:email,onChange:e=>setEmail(e.target.value),type:"email",placeholder:"seu@email.com",style:inp,onKeyDown:e=>e.key==="Enter"&&(isNovo?criar():entrar())})),React.createElement(FormField,{label:"Senha"},React.createElement('input',{value:senha,onChange:e=>setSenha(e.target.value),type:"password",placeholder:isNovo?"Mínimo 6 caracteres":"Sua senha",style:inp,onKeyDown:e=>e.key==="Enter"&&(isNovo?criar():entrar())})),erro&&React.createElement('div',{style:{fontSize:12,color:C.red,padding:"8px 12px",background:C.redL,borderRadius:8}},"⚠️",erro),React.createElement('button',{onClick:isNovo?criar:entrar,disabled:loading,style:{...btnP,marginTop:4,opacity:loading?.6:1}},loading?"Aguarde...":(isNovo?"✅ Criar conta e entrar":"🔐 Entrar")),modo!=="novo"&&(
+            React.createElement('button',{onClick:()=>{setModo(modo==="login"?"cadastro":"login");setErro("");},style:btnS},modo==="login"?"Criar nova conta":"Já tenho conta — fazer login")
+          ))))
+  );
+}
+
+function Dashboard({empresaId,empresas}){
+  const[receber,setReceber]=useState([]);
+  const[pagar,setPagar]=useState([]);
+  const[fluxo,setFluxo]=useState([]);
+  const[estoque,setEstoque]=useState([]);
+  const[loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    Promise.all([
+      DB.receber(empresaId||null),
+      DB.pagar(empresaId||null),
+      DB.fluxo(empresaId||null),
+      DB.estoque(empresaId||null),
+    ]).then(([r,p,f,e])=>{setReceber(r);setPagar(p);setFluxo(f);setEstoque(e);setLoading(false);});
+  },[empresaId]);
+
+  if(loading)returnReact.createElement('div',{style:{display:"flex",justifyContent:"center",padding:60}},React.createElement(Spinner,null));
+
+  const totalReceber=receber.reduce((s,c)=>s+Number(c.valor||0),0);
+  const totalPagar=pagar.reduce((s,c)=>s+Number(c.valor||0),0);
+  const totalEntradas=fluxo.filter(f=>f.tipo==="entrada").reduce((s,f)=>s+Number(f.valor||0),0);
+  const totalSaidas=fluxo.filter(f=>f.tipo==="saida").reduce((s,f)=>s+Number(f.valor||0),0);
+  const saldo=totalEntradas-totalSaidas;
+  const atrasados=receber.filter(c=>c.status==="Atrasado");
+  const vencidos=pagar.filter(c=>c.status==="Atrasado");
+
+  const valorEstoque=estoque.reduce((s,p)=>s+(Number(p.quantidade||0)*Number(p.custo||0)),0);
+  const receberAberto=receber.filter(c=>c.status==="Em aberto"||c.status==="Atrasado").reduce((s,c)=>s+Number(c.valor||0),0);
+  const pagarAberto=pagar.filter(c=>c.status==="Em aberto"||c.status==="Pendente"||c.status==="Atrasado").reduce((s,c)=>s+Number(c.valor||0),0);
+  const ncg=receberAberto+valorEstoque-pagarAberto;
+  const saldoTes=saldo-ncg;
+  const cgStatus=saldoTes>0?"ok":saldoTes>-5000?"atencao":"risco";
+  const cgColor={ok:C.green,atencao:C.amber,risco:C.red}[cgStatus];
+  const cgBg={ok:C.greenL,atencao:C.amberL,risco:C.redL}[cgStatus];
+  const cgLabel={ok:"✅ Saudável",atencao:"⚠️ Atenção",risco:"🚨 Risco"}[cgStatus];
+  const cgMsg={
+    ok:`Seu caixa cobre a NCG com folga de ${fmtBRL(Math.abs(saldoTes))}. Considere investir o excedente em CDB ou aplicação de curto prazo.`,
+    atencao:`Capital de giro apertado. Folga de apenas ${fmtBRL(Math.abs(saldoTes))}. Monitore de perto os recebimentos.`,
+    risco:`Déficit de ${fmtBRL(Math.abs(saldoTes))} no capital de giro. Antecipe recebíveis ou negocie prazo com fornecedores.`
+  }[cgStatus];
+  const coberturaP=ncg>0?Math.min(100,Math.round((saldo/ncg)*100)):100;
+
+  const isGrupo=!empresaId;
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},isGrupo&&(
+        React.createElement('div',{style:{background:"linear-gradient(135deg,#1e40af,#7c3aed)",borderRadius:14,padding:"18px 24px",color:"#fff"}},React.createElement('div',{style:{fontSize:12,opacity:.8,marginBottom:6}},"🌐 Visão consolidada —",Object.keys(empresas).length,"empresas"),React.createElement('div',{style:{display:"flex",gap:32,flexWrap:"wrap"}},React.createElement('div',null,React.createElement('div',{style:{fontSize:11,opacity:.7}},"A receber"),React.createElement('div',{style:{fontSize:22,fontWeight:700}},"R$",(totalReceber/1000).toFixed(0),"K")),React.createElement('div',null,React.createElement('div',{style:{fontSize:11,opacity:.7}},"A pagar"),React.createElement('div',{style:{fontSize:22,fontWeight:700}},"R$",(totalPagar/1000).toFixed(0),"K")),React.createElement('div',null,React.createElement('div',{style:{fontSize:11,opacity:.7}},"Saldo fluxo"),React.createElement('div',{style:{fontSize:22,fontWeight:700}},"R$",(saldo/1000).toFixed(0),"K")),React.createElement('div',null,React.createElement('div',{style:{fontSize:11,opacity:.7}},"NCG"),React.createElement('div',{style:{fontSize:22,fontWeight:700,color:cgColor==="#dc2626"?"#fca5a5":"#fff"}},"R$",(ncg/1000).toFixed(0),"K"))))
+      ),React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}},React.createElement(KPI,{label:"A receber",value:"R$ "+(totalReceber/1000).toFixed(1)+"K",sub:receber.length+" registros",color:C.blue}),React.createElement(KPI,{label:"A pagar",value:"R$ "+(totalPagar/1000).toFixed(1)+"K",sub:pagar.length+" registros",color:C.amber}),React.createElement(KPI,{label:"Saldo (fluxo)",value:"R$ "+(saldo/1000).toFixed(1)+"K",sub:"entradas - saídas",color:saldo>=0?C.green:C.red}),React.createElement(KPI,{label:"Recebíveis em atraso",value:atrasados.length,sub:atrasados.length>0?"⚠️ requer atenção":"✅ em dia",color:atrasados.length>0?C.red:C.green})),/* CAPITAL DE GIRO */,React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}},React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}},React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}},React.createElement('div',null,React.createElement('div',{style:{fontSize:13,fontWeight:600,color:"#374151"}},"💰 Capital de Giro"),React.createElement('div',{style:{fontSize:11,color:"#9ca3af",marginTop:1}},"Necessidade × Disponibilidade")),React.createElement('span',{style:{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:100,background:cgBg,color:cgColor}},cgLabel)),/* NCG principal */,React.createElement('div',{style:{background:"#f9fafb",borderRadius:10,padding:"12px 14px",marginBottom:12}},React.createElement('div',{style:{fontSize:11,color:C.gray,marginBottom:2}},"Necessidade de Capital de Giro (NCG)"),React.createElement('div',{style:{fontSize:26,fontWeight:700,color:"#111827",letterSpacing:-1}},fmtBRL(ncg)),React.createElement('div',{style:{fontSize:11,color:C.gray,marginTop:2}},"= Recebíveis + Estoques − Fornecedores")),/* Breakdown */,React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:6,marginBottom:12}},[
+              {label:"Recebíveis em aberto",value:receberAberto,color:C.blue,pos:true},
+              {label:"Valor em estoque",value:valorEstoque,color:C.purple,pos:true},
+              {label:"Fornecedores a pagar",value:pagarAberto,color:C.red,pos:false},
+            ].map((it,i)=>(
+              React.createElement('div',{key:i,style:{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}},React.createElement('div',{style:{display:"flex",alignItems:"center",gap:6}},React.createElement('div',{style:{width:8,height:8,borderRadius:2,background:it.color,flexShrink:0}}),React.createElement('span',{style:{color:C.gray}},it.label)),React.createElement('span',{style:{fontWeight:600,color:it.pos?"#374151":C.red}},it.pos?"+":"-",fmtBRL(it.value)))
+            ))),/* Barra cobertura */,React.createElement('div',{style:{marginBottom:12}},React.createElement('div',{style:{display:"flex",justifyContent:"space-between",fontSize:11,color:C.gray,marginBottom:4}},React.createElement('span',null,"Cobertura do caixa"),React.createElement('span',{style:{fontWeight:600,color:cgColor}},coberturaP,"%")),React.createElement('div',{style:{background:"#f3f4f6",borderRadius:100,height:8,overflow:"hidden"}},React.createElement('div',{style:{height:"100%",width:`${coberturaP}%`,background:cgColor,borderRadius:100,transition:"width .4s"}}))),/* Saldo tesouraria */,React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}},React.createElement('div',{style:{background:saldoTes>=0?C.greenL:C.redL,borderRadius:8,padding:"8px 10px"}},React.createElement('div',{style:{fontSize:10,color:C.gray}},"Saldo de tesouraria"),React.createElement('div',{style:{fontSize:14,fontWeight:700,color:saldoTes>=0?C.green:C.red}},saldoTes>=0?"+":"",fmtBRL(saldoTes))),React.createElement('div',{style:{background:"#eff6ff",borderRadius:8,padding:"8px 10px"}},React.createElement('div',{style:{fontSize:10,color:C.gray}},"Ciclo financeiro"),React.createElement('div',{style:{fontSize:14,fontWeight:700,color:C.blue}},totalSaidas>0?Math.round((ncg/Math.max(totalSaidas,1))*30)+"d":"—"))),/* Recomendação IA */,React.createElement('div',{style:{padding:"8px 10px",background:cgBg,borderRadius:8,borderLeft:`3px solid ${cgColor}`}},React.createElement('div',{style:{fontSize:11,color:cgColor,lineHeight:1.5}},"💡",React.createElement('strong',null,"Recomendação:"),cgMsg))),/* Resumo financeiro */,React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:12}},React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16,flex:1}},React.createElement('div',{style:{fontSize:13,fontWeight:600,marginBottom:12}},"📋 Últimas contas a receber"),receber.length===0?React.createElement(Empty,{msg:"Nenhuma conta cadastrada"}):(
+              React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},React.createElement('thead',null,React.createElement('tr',null,["Cliente","Valor","Status"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"5px 8px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11}}>{h}</th>))),React.createElement('tbody',null,receber.slice(0,5).map((c,i)=>(
+                  React.createElement('tr',{key:i,style:{borderBottom:"1px solid #f3f4f6"}},React.createElement('td',{style:{padding:"6px 8px",fontWeight:500,color:"#374151",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},c.cliente),React.createElement('td',{style:{padding:"6px 8px",fontWeight:600,color:C.blue}},fmtBRL(c.valor)),React.createElement('td',{style:{padding:"6px 8px"}},React.createElement(Badge,{type:{Atrasado:"red","Em aberto":"blue",Recebido:"green"}[c.status]||"gray"},c.status)))
+                ))))
+            )),React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16,flex:1}},React.createElement('div',{style:{fontSize:13,fontWeight:600,marginBottom:12}},"💸 Últimas movimentações"),fluxo.length===0?React.createElement(Empty,{msg:"Nenhuma movimentação cadastrada"}):(
+              React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},React.createElement('thead',null,React.createElement('tr',null,["Descrição","Tipo","Valor"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"5px 8px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11}}>{h}</th>))),React.createElement('tbody',null,fluxo.slice(0,5).map((f,i)=>(
+                  React.createElement('tr',{key:i,style:{borderBottom:"1px solid #f3f4f6"}},React.createElement('td',{style:{padding:"6px 8px",color:"#374151",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},f.descricao),React.createElement('td',{style:{padding:"6px 8px"}},React.createElement(Badge,{type:f.tipo==="entrada"?"green":"red"},f.tipo)),React.createElement('td',{style:{padding:"6px 8px",fontWeight:600,color:f.tipo==="entrada"?C.green:C.red}},f.tipo==="entrada"?"+":"-",fmtBRL(f.valor)))
+                ))))
+            )))),vencidos.length>0&&(
+        React.createElement('div',{style:{background:C.redL,border:"1px solid #fca5a5",borderRadius:12,padding:14,display:"flex",alignItems:"center",gap:10}},React.createElement('span',{style:{fontSize:20}},"⚠️"),React.createElement('div',null,React.createElement('div',{style:{fontSize:13,fontWeight:600,color:"#991b1b"}},"Contas a pagar vencidas"),React.createElement('div',{style:{fontSize:12,color:C.red}},vencidos.length,"conta",vencidos.length>1?"s":"","em atraso · Total:",fmtBRL(vencidos.reduce((s,c)=>s+Number(c.valor||0),0)))))
+      ))
+  );
+}
+
+function ContasReceberPanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[busca,setBusca]=useState("");
+  const[filtro,setFiltro]=useState("todos");
+  const STATUS=["Em aberto","Recebido","Atrasado","Cancelado"];
+  const statusBadge={Atrasado:"red","Em aberto":"blue",Recebido:"green",Cancelado:"gray"};
+  const FORM0={empresa_id:empresaId,cliente:"",pedido:"",vencimento:"",valor:"",status:"Em aberto",origem:"Manual"};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.receber(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId,vencimento:item.vencimento||""}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.cliente||!form.valor){alert("Preencha cliente e valor");return;}
+    await DB.saveReceber({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delReceber(confirmDel);setConfirmDel(null);carregar();};
+
+  const vis=dados.filter(c=>(filtro==="todos"||c.status===filtro)&&(busca===""||c.cliente.toLowerCase().includes(busca.toLowerCase())));
+  const total=vis.reduce((s,c)=>s+Number(c.valor||0),0);
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}},React.createElement(KPI,{label:"Total a receber",value:"R$ "+(dados.reduce((s,c)=>s+Number(c.valor||0),0)/1000).toFixed(1)+"K",sub:dados.length+" registros"}),React.createElement(KPI,{label:"Em aberto",value:dados.filter(c=>c.status==="Em aberto").length,sub:"aguardando"}),React.createElement(KPI,{label:"Recebidos",value:dados.filter(c=>c.status==="Recebido").length,sub:"confirmados",color:C.green}),React.createElement(KPI,{label:"Atrasados",value:dados.filter(c=>c.status==="Atrasado").length,sub:"requer atenção",color:C.red})),React.createElement('div',{style:{display:"flex",gap:10,alignItems:"center"}},React.createElement('input',{value:busca,onChange:e=>setBusca(e.target.value),placeholder:"Buscar cliente...",style:{flex:1,...inp}}),["todos","Em aberto","Recebido","Atrasado"].map(f=>(
+          React.createElement('button',{key:f,onClick:()=>setFiltro(f),style:{padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",background:filtro===f?C.blue:"#f3f4f6",color:filtro===f?"#fff":C.gray}},f==="todos"?"Todos":f)
+        )),!(!empresaId)&&React.createElement('button',{onClick:()=>abrir(),style:{...btnP,whiteSpace:"nowrap"}},"+ Novo")),React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}},loading?React.createElement('div',{style:{padding:40,textAlign:"center"}},React.createElement(Spinner,null)):vis.length===0?React.createElement(Empty,null):(
+          React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},React.createElement('thead',null,React.createElement('tr',{style:{background:"#f9fafb"}},["Cliente","Pedido","Vencimento","Valor","Origem","Status","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:12}}>{h}</th>))),React.createElement('tbody',null,vis.map((c,i)=>(
+              React.createElement('tr',{key:c.id||i,style:{borderBottom:"1px solid #f3f4f6"}},React.createElement('td',{style:{padding:"9px 12px",fontWeight:500,color:"#111827"}},c.cliente),React.createElement('td',{style:{padding:"9px 12px",color:C.gray,fontSize:12}},c.pedido||"—"),React.createElement('td',{style:{padding:"9px 12px",color:C.gray}},fmtDate(c.vencimento)),React.createElement('td',{style:{padding:"9px 12px",fontWeight:600,color:C.blue}},fmtBRL(c.valor)),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement('span',{style:{fontSize:10,padding:"2px 7px",borderRadius:100,background:"#f3f4f6",color:C.gray}},c.origem||"Manual")),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement(Badge,{type:statusBadge[c.status]||"gray"},c.status)),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement('div',{style:{display:"flex",gap:4}},React.createElement('button',{onClick:()=>abrir(c),style:{padding:"3px 9px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}},"✏️"),React.createElement('button',{onClick:()=>setConfirmDel(c.id),style:{padding:"3px 9px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}},"🗑️"))))
+            ))))
+        ),React.createElement('div',{style:{padding:"10px 16px",borderTop:"1px solid #e5e7eb",background:"#f9fafb",fontSize:12,color:C.gray}},vis.length,"registros · Total filtrado:",React.createElement('strong',{style:{color:"#374151"}},fmtBRL(total)))),showForm&&(
+        React.createElement(Modal,{title:editItem?"✏️ Editar conta a receber":"+ Nova conta a receber",onClose:()=>setShowForm(false)},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},React.createElement(FormField,{label:"Cliente *"},React.createElement('input',{value:form.cliente,onChange:e=>setForm(f=>({...f,cliente:e.target.value})),style:inp})),React.createElement(FormField,{label:"Pedido / NF"},React.createElement('input',{value:form.pedido||"",onChange:e=>setForm(f=>({...f,pedido:e.target.value})),style:inp})),React.createElement(FormField,{label:"Valor (R$) *"},React.createElement('input',{type:"number",value:form.valor,onChange:e=>setForm(f=>({...f,valor:e.target.value})),style:inp})),React.createElement(FormField,{label:"Vencimento"},React.createElement('input',{type:"date",value:form.vencimento||"",onChange:e=>setForm(f=>({...f,vencimento:e.target.value})),style:inp})),React.createElement(FormField,{label:"Status"},React.createElement('select',{value:form.status,onChange:e=>setForm(f=>({...f,status:e.target.value})),style:inp},STATUS.map(s=><option key={s}>{s}</option>))),React.createElement(FormField,{label:"Origem"},React.createElement('input',{value:form.origem||"Manual",onChange:e=>setForm(f=>({...f,origem:e.target.value})),style:inp}))),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setShowForm(false),style:btnS},"Cancelar"),React.createElement('button',{onClick:salvar,style:btnP},"💾 Salvar")))
+      ),confirmDel&&(
+        React.createElement(Modal,{title:"🗑️ Excluir registro?",onClose:()=>setConfirmDel(null),width:360},React.createElement('div',{style:{fontSize:13,color:C.gray,marginBottom:20}},"Esta ação não pode ser desfeita."),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setConfirmDel(null),style:btnS},"Cancelar"),React.createElement('button',{onClick:excluir,style:{...btnP,background:C.red}},"Excluir")))
+      ))
+  );
+}
+
+function ContasPagarPanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[contasBanc,setContasBanc]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[confirmDelGrupo,setConfirmDelGrupo]=useState(null);
+  const[busca,setBusca]=useState("");
+  const[filtro,setFiltro]=useState("todos");
+  const[filtroConta,setFiltroConta]=useState("todas");
+  const[showImport,setShowImport]=useState(false);
+  const[importTab,setImportTab]=useState("foto");
+  const STATUS=["Em aberto","Pago","Pendente","Atrasado"];
+  const CATS=["Fornecedores","Serviços","Energia","Aluguel","Impostos","Folha","Outros"];
+  const statusBadge={Atrasado:"red","Em aberto":"blue",Pago:"green",Pendente:"amber"};
+
+  const mesAtual=new Date().toISOString().slice(0,7);
+  const FORM0={
+    empresa_id:empresaId,fornecedor:"",categoria:"Outros",
+    vencimento:"",valor:"",status:"Em aberto",documento:"",observacoes:"",
+    competencia:mesAtual,total_parcelas:1,parcela_atual:1,
+    fixo:false,meses_fixo:12,conta_bancaria_id:"",grupo_parcela:null,
+  };
+  const[form,setForm]=useState(FORM0);
+
+  const[fileStage,setFileStage]=useState("idle");
+  const[fileSrc,setFileSrc]=useState(null);
+  const[fileB64,setFileB64]=useState(null);
+  const[fileMime,setFileMime]=useState("image/jpeg");
+  const[fileData,setFileData]=useState(null);
+  const[fileErr,setFileErr]=useState("");
+  const[xmlData,setXmlData]=useState(null);
+  const[xmlErr,setXmlErr]=useState("");
+  const fotoRef=useRef(null);
+  const pdfRef=useRef(null);
+  const xmlRef=useRef(null);
+
+  const carregar=async()=>{
+    setLoading(true);
+    const[d,cb]=await Promise.all([DB.pagar(empresaId),DB.contasBancarias(empresaId)]);
+    setDados(d);setContasBanc(cb);setLoading(false);
+  };
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{
+    setEditItem(item);
+    setForm(item?{...FORM0,...item,empresa_id:empresaId,total_parcelas:item.total_parcelas||1,meses_fixo:12}:FORM0);
+    setShowForm(true);
+  };
+
+  const genGrupo=()=>Math.random().toString(36).slice(2,10).toUpperCase();
+
+  const salvar=async()=>{
+    if(!form.fornecedor||!form.valor){alert("Preencha fornecedor e valor");return;}
+    const grupo=genGrupo();
+    const totalParcelas=Number(form.total_parcelas)||1;
+    const isFixo=form.fixo;
+    const mesesFixo=Number(form.meses_fixo)||12;
+    const totalLancamentos=isFixo?mesesFixo:totalParcelas;
+
+    if(editItem){
+      await DB.savePagar({...form,empresa_id:empresaId});
+    } else if(totalLancamentos>1){
+      const baseVenc=form.vencimento?new Date(form.vencimento+"T12:00:00"):new Date();
+      const baseComp=form.competencia||mesAtual;
+      const grp=grupo;
+      for(let i=0;i<totalLancamentos;i++){
+        const vencDt=new Date(baseVenc);
+        vencDt.setMonth(vencDt.getMonth()+i);
+        const compParts=baseComp.split("-");
+        const compDt=new Date(parseInt(compParts[0]),parseInt(compParts[1])-1+i,1);
+        const compStr=compDt.getFullYear()+"-"+String(compDt.getMonth()+1).padStart(2,"0");
+        await DB.savePagar({
+          ...form,empresa_id:empresaId,
+          parcela_atual:i+1,total_parcelas:totalLancamentos,
+          grupo_parcela:grp,
+          vencimento:vencDt.toISOString().slice(0,10),
+          competencia:compStr,
+          observacoes:(form.observacoes||"")+(isFixo?" [Fixo]":" ["+( i+1)+"/"+totalLancamentos+"]"),
+        });
+      }
+    } else {
+      await DB.savePagar({...form,empresa_id:empresaId,grupo_parcela:null});
+    }
+    setShowForm(false);carregar();
+  };
+
+  const excluir=async()=>{await DB.delPagar(confirmDel);setConfirmDel(null);carregar();};
+  const excluirGrupo=async()=>{await DB.delPagarGrupo(confirmDelGrupo);setConfirmDelGrupo(null);carregar();};
+
+  const handleFile=(file,tipo)=>{
+    if(!file)return;setFileErr("");
+    const r=new FileReader();
+    r.onload=(e)=>{setFileB64(e.target.result.split(",")[1]);setFileMime(file.type||"image/jpeg");setFileSrc(e.target.result);setFileStage("preview");};
+    r.readAsDataURL(file);
+  };
+  const analisarArquivo=async()=>{
+    setFileStage("reading");setFileErr("");
+    try{
+      const GEMINI_KEY="AIzaSyCUoSDTwRZ4mL7NDKN0c8SArjI0XMSW1S0";
+      const prompt='Extraia dados deste documento fiscal. Responda APENAS com JSON válido sem markdown: {"fornecedor":"","cnpj_fornecedor":"","valor":0,"vencimento":"DD/MM/AAAA","competencia":"MM/AAAA","categoria":"Fornecedores|Serviços|Energia|Aluguel|Impostos|Folha|Outros","documento":"","chave_nfe":"","observacoes":""}';
+      const model=fileMime==="application/pdf"?"gemini-2.0-flash":"gemini-2.0-flash";
+      const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({contents:[{parts:[{inline_data:{mime_type:fileMime,data:fileB64}},{text:prompt}]}],generationConfig:{temperature:0,maxOutputTokens:600}})
+      });
+      const d=await res.json();
+      if(d.error)throw new Error(d.error.message);
+      const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||"{}";
+      const clean=raw.replace(/```json|```/g,"").replace(/^[^{]*/,"").replace(/[^}]*$/,"").trim();
+      const parsed=JSON.parse(clean||"{}");
+      setFileData(parsed);setFileStage("review");
+    }catch(e){setFileErr("Erro: "+e.message);setFileStage("preview");}
+  };
+  const confirmarArquivo=async()=>{
+    const venc=fileData.vencimento?toISO(fileData.vencimento):null;
+    const comp=fileData.competencia?(()=>{const p=fileData.competencia.split("/");return p.length===2?p[1]+"-"+p[0].padStart(2,"0"):mesAtual;})():mesAtual;
+    await DB.savePagar({empresa_id:empresaId,fornecedor:fileData.fornecedor||"Importado",categoria:fileData.categoria||"Outros",vencimento:venc,valor:fileData.valor||0,status:"Em aberto",documento:fileData.documento||fileData.chave_nfe||"",competencia:comp,total_parcelas:1,parcela_atual:1,observacoes:(fileData.observacoes||"")+(fileData.cnpj_fornecedor?" | CNPJ: "+fileData.cnpj_fornecedor:"")});
+    resetImport();carregar();
+  };
+  const resetImport=()=>{setFileStage("idle");setFileSrc(null);setFileB64(null);setFileData(null);setFileErr("");setXmlData(null);setXmlErr("");};
+
+  const handleXML=(file)=>{
+    if(!file)return;setXmlErr("");setXmlData(null);
+    const r=new FileReader();
+    r.onload=(e)=>{
+      try{
+        const xml=(new DOMParser()).parseFromString(e.target.result,"text/xml");
+        const get=(tag)=>xml.getElementsByTagName(tag)[0]?.textContent||"";
+        const emit=xml.getElementsByTagName("emit")[0];
+        const fmtD=(d)=>{if(!d)return"";const p=d.slice(0,10).split("-");return p.length===3?p[2]+"/"+p[1]+"/"+p[0]:d;};
+        const dtEmissao=get("dhEmi")||get("dEmi")||"";
+        const compStr=dtEmissao?dtEmissao.slice(0,7):"";
+        setXmlData({
+          fornecedor:emit?.getElementsByTagName("xNome")[0]?.textContent||get("xNome")||"",
+          cnpj_fornecedor:emit?.getElementsByTagName("CNPJ")[0]?.textContent||"",
+          valor:parseFloat(get("vNF")||get("vProd")||"0")||0,
+          vencimento:fmtD((xml.getElementsByTagName("dup")[0])?.getElementsByTagName("dVenc")[0]?.textContent||dtEmissao),
+          competencia:compStr,categoria:"Fornecedores",
+          documento:"NF "+get("nNF"),chave_nfe:get("chNFe"),natureza:get("natOp"),observacoes:get("natOp")?"Nat: "+get("natOp"):"",
+        });
+      }catch(err){setXmlErr("Erro ao ler XML: "+err.message);}
+    };
+    r.readAsText(file);
+  };
+  const confirmarXML=async()=>{
+    const venc=xmlData.vencimento?toISO(xmlData.vencimento):null;
+    await DB.savePagar({empresa_id:empresaId,fornecedor:xmlData.fornecedor,categoria:xmlData.categoria,vencimento:venc,valor:xmlData.valor,status:"Em aberto",documento:xmlData.documento,competencia:xmlData.competencia||mesAtual,total_parcelas:1,parcela_atual:1,observacoes:(xmlData.observacoes||"")+(xmlData.cnpj_fornecedor?" | CNPJ: "+xmlData.cnpj_fornecedor:"")+(xmlData.chave_nfe?" | Chave: "+xmlData.chave_nfe.slice(0,20)+"...":"")});
+    resetImport();carregar();
+  };
+
+  const getConta=(id)=>contasBanc.find(c=>c.id===id);
+  const tipoIcon={corrente:"🏦",poupanca:"💰",credito:"💳",debito:"💳"};
+
+  const vis=dados.filter(c=>(filtro==="todos"||c.status===filtro)&&(filtroConta==="todas"||c.conta_bancaria_id===filtroConta)&&(busca===""||c.fornecedor.toLowerCase().includes(busca.toLowerCase())));
+  const total=vis.reduce((s,c)=>s+Number(c.valor||0),0);
+  const totalPago=vis.filter(c=>c.status==="Pago").reduce((s,c)=>s+Number(c.valor||0),0);
+
+  const IMPORT_TABS=[{id:"foto",label:"📷 Foto",desc:"Boleto ou NF"},{id:"pdf",label:"📄 PDF",desc:"Fatura ou boleto"},{id:"xml",label:"📋 XML",desc:"NF-e eletrônica"}];
+
+  const fmtComp=(c)=>{if(!c)return"—";const p=c.split("-");return p.length===2?p[1].padStart(2,"0")+"/"+p[0]:c;};
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}},React.createElement(KPI,{label:"Total a pagar",value:"R$ "+(dados.reduce((s,c)=>s+Number(c.valor||0),0)/1000).toFixed(1)+"K",sub:dados.length+" registros"}),React.createElement(KPI,{label:"Em aberto",value:dados.filter(c=>c.status==="Em aberto").length}),React.createElement(KPI,{label:"Pagos",value:dados.filter(c=>c.status==="Pago").length,color:C.green}),React.createElement(KPI,{label:"Atrasados",value:dados.filter(c=>c.status==="Atrasado").length,color:C.red})),/* IMPORT DOCUMENTO */,React.createElement('div',{style:{background:"#fff",border:`1px solid ${showImport?C.blue:"#e5e7eb"}`,borderRadius:12,padding:16}},React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between"}},React.createElement('div',null,React.createElement('div',{style:{fontSize:13,fontWeight:600}},"📑 Lançar por documento"),React.createElement('div',{style:{fontSize:11,color:C.gray}},"Foto · PDF · XML NF-e — IA extrai os dados automaticamente")),React.createElement('button',{onClick:()=>{setShowImport(v=>!v);resetImport();},style:{...btnP,fontSize:12}},showImport?"Fechar":"+ Importar documento")),showImport&&(
+          React.createElement('div',{style:{marginTop:16}},React.createElement('div',{style:{display:"flex",gap:8,marginBottom:16}},IMPORT_TABS.map(t=>(
+                React.createElement('button',{key:t.id,onClick:()=>{setImportTab(t.id);resetImport();},style:{flex:1,padding:"10px 12px",borderRadius:10,border:`1.5px solid ${importTab===t.id?C.blue:"#e5e7eb"}`,background:importTab===t.id?"#eff6ff":"#fff",cursor:"pointer",textAlign:"center"}},React.createElement('div',{style:{fontSize:14,marginBottom:2}},t.label),React.createElement('div',{style:{fontSize:11,color:C.gray}},t.desc))
+              ))),importTab==="foto"&&(
+              React.createElement('div',null,fileStage==="idle"&&<div onClick={()=>fotoRef.current?.click()} style={{border:"2px dashed #d1d5db",borderRadius:10,padding:28,textAlign:"center",cursor:"pointer",background:"#fafafa"}}><input ref={fotoRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0],"foto")}/><div style={{fontSize:32,marginBottom:8}}>📷</div><div style={{fontSize:13,color:"#374151"}}>Clique para tirar foto ou selecionar imagem</div></div>,fileStage==="preview"&&fileSrc&&(<div style={{display:"flex",gap:14,alignItems:"flex-start"}}><img src={fileSrc} style={{width:160,maxHeight:200,objectFit:"contain",borderRadius:8,border:"1px solid #e5e7eb"}}/><div style={{flex:1}}><div style={{fontSize:13,color:"#374151",marginBottom:12}}>Imagem carregada. A IA vai extrair os dados.</div>{fileErr&&<div style={{fontSize:12,color:C.red,marginBottom:8}}>⚠️ {fileErr}</div>}<div style={{display:"flex",gap:8}}><button onClick={analisarArquivo} style={btnP}>🤖 Analisar com IA</button><button onClick={resetImport} style={btnS}>Cancelar</button></div></div></div>),fileStage==="reading"&&<div style={{padding:24,textAlign:"center",color:C.gray}}>🔍 Lendo documento com IA...</div>,fileStage==="review"&&fileData&&<FileReviewCard data={fileData} onConfirm={confirmarArquivo} onBack={()=>setFileStage("preview")}/>)
+            ),importTab==="pdf"&&(
+              React.createElement('div',null,fileStage==="idle"&&<div onClick={()=>pdfRef.current?.click()} style={{border:"2px dashed #d1d5db",borderRadius:10,padding:28,textAlign:"center",cursor:"pointer",background:"#fafafa"}}><input ref={pdfRef} type="file" accept="application/pdf" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0],"pdf")}/><div style={{fontSize:32,marginBottom:8}}>📄</div><div style={{fontSize:13,color:"#374151"}}>Clique para selecionar o PDF</div></div>,fileStage==="preview"&&(<div style={{padding:16,background:"#f9fafb",borderRadius:10,display:"flex",alignItems:"center",gap:12}}><span style={{fontSize:32}}>📄</span><div style={{flex:1}}><div style={{fontSize:13,fontWeight:500}}>PDF carregado</div><div style={{fontSize:12,color:C.gray}}>A IA vai ler e extrair os dados</div></div>{fileErr&&<div style={{fontSize:12,color:C.red}}>⚠️ {fileErr}</div>}<div style={{display:"flex",gap:8}}><button onClick={analisarArquivo} style={btnP}>🤖 Analisar com IA</button><button onClick={resetImport} style={btnS}>Cancelar</button></div></div>),fileStage==="reading"&&<div style={{padding:24,textAlign:"center",color:C.gray}}>🔍 Lendo PDF com IA...</div>,fileStage==="review"&&fileData&&<FileReviewCard data={fileData} onConfirm={confirmarArquivo} onBack={()=>setFileStage("preview")}/>)
+            ),importTab==="xml"&&(
+              React.createElement('div',null,!xmlData&&(<div><div onClick={()=>xmlRef.current?.click()} style={{border:"2px dashed #d1d5db",borderRadius:10,padding:28,textAlign:"center",cursor:"pointer",background:"#fafafa"}}><input ref={xmlRef} type="file" accept=".xml,text/xml" style={{display:"none"}} onChange={e=>handleXML(e.target.files[0])}/><div style={{fontSize:32,marginBottom:8}}>📋</div><div style={{fontSize:13,color:"#374151"}}>Selecionar XML da NF-e</div></div>{xmlErr&&<div style={{marginTop:10,fontSize:12,color:C.red,padding:"8px 12px",background:C.redL,borderRadius:8}}>⚠️ {xmlErr}</div>}</div>),xmlData&&<FileReviewCard data={xmlData} onConfirm={confirmarXML} onBack={()=>setXmlData(null)} extra={[xmlData.chave_nfe&&["Chave NF-e",xmlData.chave_nfe.slice(0,20)+"..."],xmlData.natureza&&["Natureza",xmlData.natureza]].filter(Boolean)}/>)
+            ))
+        )),/* FILTROS */,React.createElement('div',{style:{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},React.createElement('input',{value:busca,onChange:e=>setBusca(e.target.value),placeholder:"Buscar fornecedor...",style:{flex:1,...inp,minWidth:140}}),React.createElement('select',{value:filtroConta,onChange:e=>setFiltroConta(e.target.value),style:{...inp,width:"auto",padding:"7px 10px"}},React.createElement('option',{value:"todas"},"Todas as contas"),contasBanc.map(c=><option key={c.id} value={c.id}>{tipoIcon[c.tipo]} {c.nome}</option>)),["todos","Em aberto","Atrasado","Pago"].map(f=>(
+          React.createElement('button',{key:f,onClick:()=>setFiltro(f),style:{padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",background:filtro===f?C.blue:"#f3f4f6",color:filtro===f?"#fff":C.gray}},f==="todos"?"Todos":f)
+        )),!(!empresaId)&&React.createElement('button',{onClick:()=>abrir(),style:{...btnP,whiteSpace:"nowrap"}},"+ Manual")),/* TABELA */,React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}},loading?React.createElement('div',{style:{padding:40,textAlign:"center"}},React.createElement(Spinner,null)):vis.length===0?React.createElement(Empty,null):(
+          React.createElement('div',{style:{overflowX:"auto"}},React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:900}},React.createElement('thead',null,React.createElement('tr',{style:{background:"#f9fafb"}},["Fornecedor","Competência","Parcela","Vencimento","Valor","Conta/Cartão","Status","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11,whiteSpace:"nowrap"}}>{h}</th>))),React.createElement('tbody',null,vis.map((c,i)=>{
+                const conta=getConta(c.conta_bancaria_id);
+                const isParcelado=(c.total_parcelas||1)>1;
+                return(
+                  React.createElement('tr',{key:c.id||i,style:{borderBottom:"1px solid #f3f4f6",background:c.fixo?"#fafff0":"#fff"}},React.createElement('td',{style:{padding:"9px 12px"}},React.createElement('div',{style:{fontWeight:500,color:"#111827"}},c.fornecedor),React.createElement('div',{style:{fontSize:10,color:C.gray}},c.categoria,c.fixo?" · 🔁 Fixo":"")),React.createElement('td',{style:{padding:"9px 12px",color:C.gray,fontSize:11}},fmtComp(c.competencia)),React.createElement('td',{style:{padding:"9px 12px"}},isParcelado
+                        ?<span style={{fontSize:11,fontWeight:600,padding:"2px 7px",borderRadius:100,background:"#ede9fe",color:C.purple}}>{c.parcela_atual}/{c.total_parcelas}</span>
+                        :<span style={{color:C.gray,fontSize:11}}>—</span>),React.createElement('td',{style:{padding:"9px 12px",color:C.gray}},fmtDate(c.vencimento)),React.createElement('td',{style:{padding:"9px 12px",fontWeight:600,color:C.red}},fmtBRL(c.valor)),React.createElement('td',{style:{padding:"9px 12px"}},conta
+                        ?<span style={{fontSize:11,padding:"2px 8px",borderRadius:100,background:conta.cor+"18",color:conta.cor,fontWeight:500}}>{tipoIcon[conta.tipo]} {conta.nome}</span>
+                        :<span style={{fontSize:11,color:"#d1d5db"}}>—</span>),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement(Badge,{type:statusBadge[c.status]||"gray"},c.status)),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement('div',{style:{display:"flex",gap:3}},React.createElement('button',{onClick:()=>abrir(c),style:{padding:"3px 9px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}},"✏️"),React.createElement('button',{onClick:()=>setConfirmDel(c.id),style:{padding:"3px 9px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}},"🗑️"),c.grupo_parcela&&<button onClick={()=>setConfirmDelGrupo(c.grupo_parcela)} title="Excluir todas as parcelas" style={{padding:"3px 9px",borderRadius:6,background:"#fef3c7",border:"none",fontSize:11,cursor:"pointer",color:C.amber}}>🗑️ todas</button>)))
+                );
+              }))))
+        ),React.createElement('div',{style:{padding:"10px 16px",borderTop:"1px solid #e5e7eb",background:"#f9fafb",fontSize:12,color:C.gray,display:"flex",gap:24,flexWrap:"wrap"}},React.createElement('span',null,"Total filtrado:",React.createElement('strong',{style:{color:"#374151"}},fmtBRL(total))),React.createElement('span',null,"Pago:",React.createElement('strong',{style:{color:C.green}},fmtBRL(totalPago))),React.createElement('span',null,"Pendente:",React.createElement('strong',{style:{color:C.red}},fmtBRL(total-totalPago))))),/* MODAL FORM */,showForm&&(
+        React.createElement(Modal,{title:editItem?"✏️ Editar conta a pagar":"+ Nova conta a pagar",onClose:()=>setShowForm(false),width:600},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Fornecedor *"},React.createElement('input',{value:form.fornecedor,onChange:e=>setForm(f=>({...f,fornecedor:e.target.value})),style:inp}))),React.createElement(FormField,{label:"Categoria"},React.createElement('select',{value:form.categoria,onChange:e=>setForm(f=>({...f,categoria:e.target.value})),style:inp},CATS.map(c=><option key={c}>{c}</option>))),React.createElement(FormField,{label:"Valor (R$) *"},React.createElement('input',{type:"number",value:form.valor,onChange:e=>setForm(f=>({...f,valor:e.target.value})),style:inp})),React.createElement(FormField,{label:"Competência (mês ref.)"},React.createElement('input',{type:"month",value:form.competencia||"",onChange:e=>setForm(f=>({...f,competencia:e.target.value})),style:inp})),React.createElement(FormField,{label:"Vencimento"},React.createElement('input',{type:"date",value:form.vencimento||"",onChange:e=>setForm(f=>({...f,vencimento:e.target.value})),style:inp})),React.createElement(FormField,{label:"Status"},React.createElement('select',{value:form.status,onChange:e=>setForm(f=>({...f,status:e.target.value})),style:inp},STATUS.map(s=><option key={s}>{s}</option>))),React.createElement(FormField,{label:"Conta / Cartão que pagará"},React.createElement('select',{value:form.conta_bancaria_id||"",onChange:e=>setForm(f=>({...f,conta_bancaria_id:e.target.value})),style:inp},React.createElement('option',{value:""},"— Não definido —"),contasBanc.map(c=><option key={c.id} value={c.id}>{tipoIcon[c.tipo]} {c.nome}{c.ultimos_digitos?" ····"+c.ultimos_digitos:""}</option>))),React.createElement(FormField,{label:"Documento / NF"},React.createElement('input',{value:form.documento||"",onChange:e=>setForm(f=>({...f,documento:e.target.value})),style:inp})),!editItem&&(
+              React.createElement('div',{style:{gridColumn:"1/-1",padding:12,background:"#f9fafb",borderRadius:10,border:"1px solid #f3f4f6"}},React.createElement('div',{style:{fontSize:12,fontWeight:600,color:"#374151",marginBottom:10}},"⚙️ Recorrência"),React.createElement('div',{style:{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}),React.createElement('label',{style:{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:"#374151"}},React.createElement('input',{type:"checkbox",checked:form.fixo,onChange:e=>setForm(f=>({...f,fixo:e.target.checked,total_parcelas:1})),style:{width:16,height:16}}),"🔁 Valor fixo mensal"),form.fixo?(
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontSize:12,color:C.gray}}>Lançar por</span>
+                      <input type="number" min="1" max="60" value={form.meses_fixo} onChange={e=>setForm(f=>({...f,meses_fixo:e.target.value}))} style={{...inp,width:60,textAlign:"center"}}/>
+                      <span style={{fontSize:12,color:C.gray}}>meses</span>
+                    </div>
+                  ):(
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontSize:12,color:C.gray}}>Parcelas:</span>
+                      <input type="number" min="1" max="24" value={form.total_parcelas} onChange={e=>setForm(f=>({...f,total_parcelas:e.target.value}))} style={{...inp,width:60,textAlign:"center"}}/>
+                      <span style={{fontSize:12,color:C.gray}}>vezes</span>
+                    </div>
+                  ))
+                {(Number(form.total_parcelas)>1||form.fixo)&&(
+                  React.createElement('div',{style:{marginTop:8,fontSize:11,color:C.blue,padding:"6px 10px",background:"#eff6ff",borderRadius:6}},"💡 Serão criados",React.createElement('strong',null,form.fixo?form.meses_fixo:form.total_parcelas),"lançamentos com vencimento mensal a partir da data informada")
+                )}
+              </div>
+            ),React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Observações"},React.createElement('textarea',{value:form.observacoes||"",onChange:e=>setForm(f=>({...f,observacoes:e.target.value})),rows:2,style:{...inp,resize:"vertical"}})))),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setShowForm(false),style:btnS},"Cancelar"),React.createElement('button',{onClick:salvar,style:btnP},"💾",form.fixo?"Lançar "+form.meses_fixo+" meses":Number(form.total_parcelas)>1?"Lançar "+form.total_parcelas+"x":"Salvar")))
+      ),/* Confirmar exclusão simples */,confirmDel&&(
+        React.createElement(Modal,{title:"🗑️ Excluir esta conta?",onClose:()=>setConfirmDel(null),width:360},React.createElement('div',{style:{fontSize:13,color:C.gray,marginBottom:20}},"Esta ação não pode ser desfeita."),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setConfirmDel(null),style:btnS},"Cancelar"),React.createElement('button',{onClick:excluir,style:{...btnP,background:C.red}},"Excluir")))
+      ),/* Confirmar exclusão de grupo */,confirmDelGrupo&&(
+        React.createElement(Modal,{title:"🗑️ Excluir todas as parcelas?",onClose:()=>setConfirmDelGrupo(null),width:400},React.createElement('div',{style:{fontSize:13,color:C.gray,marginBottom:20}},"Todas as parcelas deste grupo serão excluídas. Esta ação não pode ser desfeita."),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setConfirmDelGrupo(null),style:btnS},"Cancelar"),React.createElement('button',{onClick:excluirGrupo,style:{...btnP,background:C.red}},"Excluir todas")))
+      ))
+  );
+}
+
+function FileReviewCard({data,onConfirm,onBack,extra=[]}){
+  return(
+    React.createElement('div',null,React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}},[
+          ["Fornecedor",data.fornecedor],
+          ["CNPJ",data.cnpj_fornecedor],
+          ["Valor","R$ "+Number(data.valor||0).toLocaleString("pt-BR",{minimumFractionDigits:2})],
+          ["Vencimento",data.vencimento],
+          ["Categoria",data.categoria],
+          ["Documento",data.documento],
+          ...extra,
+        ].filter(([,v])=>v).map(([l,v])=>(
+          React.createElement('div',{key:l,style:{background:"#f9fafb",borderRadius:8,padding:"8px 12px"}},React.createElement('div',{style:{fontSize:10,color:C.gray,marginBottom:2}},l),React.createElement('div',{style:{fontSize:13,fontWeight:500,color:"#111827"}},v||"—"))
+        ))),data.observacoes&&React.createElement('div',{style:{fontSize:12,color:C.gray,padding:"8px 10px",background:"#fef9ec",borderRadius:8,marginBottom:12,borderLeft:"3px solid "+C.amber}},data.observacoes),React.createElement('div',{style:{display:"flex",gap:8}},React.createElement('button',{onClick:onConfirm,style:{...btnP,background:C.green}},"✅ Confirmar lançamento"),React.createElement('button',{onClick:onBack,style:btnS},"← Reanalisar")))
+  );
+}
+
+function FluxoPanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[busca,setBusca]=useState("");
+  const[filtro,setFiltro]=useState("todos");
+  const CATS=["Vendas","Serviços","Compras","Folha","Aluguel","Impostos","Financeiro","Outros"];
+  const FORM0={empresa_id:empresaId,data:new Date().toISOString().slice(0,10),descricao:"",categoria:"Outros",tipo:"entrada",valor:""};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.fluxo(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.descricao||!form.valor){alert("Preencha descrição e valor");return;}
+    await DB.saveFluxo({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delFluxo(confirmDel);setConfirmDel(null);carregar();};
+
+  const entradas=dados.filter(f=>f.tipo==="entrada").reduce((s,f)=>s+Number(f.valor||0),0);
+  const saidas=dados.filter(f=>f.tipo==="saida").reduce((s,f)=>s+Number(f.valor||0),0);
+  const vis=dados.filter(f=>(filtro==="todos"||f.tipo===filtro)&&(busca===""||f.descricao.toLowerCase().includes(busca.toLowerCase())));
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}},React.createElement(KPI,{label:"Total entradas",value:"R$ "+(entradas/1000).toFixed(1)+"K",color:C.green}),React.createElement(KPI,{label:"Total saídas",value:"R$ "+(saidas/1000).toFixed(1)+"K",color:C.red}),React.createElement(KPI,{label:"Saldo",value:"R$ "+((entradas-saidas)/1000).toFixed(1)+"K",color:entradas>=saidas?C.green:C.red}),React.createElement(KPI,{label:"Movimentações",value:dados.length,sub:"registros"})),React.createElement('div',{style:{display:"flex",gap:10,alignItems:"center"}},React.createElement('input',{value:busca,onChange:e=>setBusca(e.target.value),placeholder:"Buscar descrição...",style:{flex:1,...inp}}),["todos","entrada","saida"].map(f=>(
+          React.createElement('button',{key:f,onClick:()=>setFiltro(f),style:{padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",background:filtro===f?C.blue:"#f3f4f6",color:filtro===f?"#fff":C.gray}},f==="todos"?"Todos":f==="entrada"?"Entradas":"Saídas")
+        )),!(!empresaId)&&React.createElement('button',{onClick:()=>abrir(),style:{...btnP,whiteSpace:"nowrap"}},"+ Lançamento")),React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}},loading?React.createElement('div',{style:{padding:40,textAlign:"center"}},React.createElement(Spinner,null)):vis.length===0?React.createElement(Empty,null):(
+          React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},React.createElement('thead',null,React.createElement('tr',{style:{background:"#f9fafb"}},["Data","Descrição","Categoria","Tipo","Valor","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:12}}>{h}</th>))),React.createElement('tbody',null,vis.map((f,i)=>(
+              React.createElement('tr',{key:f.id||i,style:{borderBottom:"1px solid #f3f4f6"}},React.createElement('td',{style:{padding:"9px 12px",color:C.gray}},fmtDate(f.data)),React.createElement('td',{style:{padding:"9px 12px",fontWeight:500,color:"#111827"}},f.descricao),React.createElement('td',{style:{padding:"9px 12px",color:C.gray}},f.categoria||"—"),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement(Badge,{type:f.tipo==="entrada"?"green":"red"},f.tipo)),React.createElement('td',{style:{padding:"9px 12px",fontWeight:600,color:f.tipo==="entrada"?C.green:C.red}},f.tipo==="entrada"?"+":"-",fmtBRL(f.valor)),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement('div',{style:{display:"flex",gap:4}},React.createElement('button',{onClick:()=>abrir(f),style:{padding:"3px 9px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}},"✏️"),React.createElement('button',{onClick:()=>setConfirmDel(f.id),style:{padding:"3px 9px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}},"🗑️"))))
+            ))))
+        )),showForm&&(
+        React.createElement(Modal,{title:editItem?"✏️ Editar lançamento":"+ Novo lançamento",onClose:()=>setShowForm(false)},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Descrição *"},React.createElement('input',{value:form.descricao,onChange:e=>setForm(f=>({...f,descricao:e.target.value})),style:inp}))),React.createElement(FormField,{label:"Tipo"},React.createElement('select',{value:form.tipo,onChange:e=>setForm(f=>({...f,tipo:e.target.value})),style:inp},React.createElement('option',{value:"entrada"},"Entrada"),React.createElement('option',{value:"saida"},"Saída"))),React.createElement(FormField,{label:"Valor (R$) *"},React.createElement('input',{type:"number",value:form.valor,onChange:e=>setForm(f=>({...f,valor:e.target.value})),style:inp})),React.createElement(FormField,{label:"Data"},React.createElement('input',{type:"date",value:form.data||"",onChange:e=>setForm(f=>({...f,data:e.target.value})),style:inp})),React.createElement(FormField,{label:"Categoria"},React.createElement('select',{value:form.categoria,onChange:e=>setForm(f=>({...f,categoria:e.target.value})),style:inp},CATS.map(c=><option key={c}>{c}</option>)))),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setShowForm(false),style:btnS},"Cancelar"),React.createElement('button',{onClick:salvar,style:btnP},"💾 Salvar")))
+      ),confirmDel&&(
+        React.createElement(Modal,{title:"🗑️ Excluir?",onClose:()=>setConfirmDel(null),width:360},React.createElement('div',{style:{fontSize:13,color:C.gray,marginBottom:20}},"Esta ação não pode ser desfeita."),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setConfirmDel(null),style:btnS},"Cancelar"),React.createElement('button',{onClick:excluir,style:{...btnP,background:C.red}},"Excluir")))
+      ))
+  );
+}
+
+const QUALIDADE_CFG={
+  bom:         {label:"Bom",           icon:"🌡️",  color:"#16a34a", bg:"#dcfce7", desc:"Estoque saudável e disponível"},
+  aprendizado: {label:"Em aprendizado",icon:"🎓",  color:"#2563eb", bg:"#dbeafe", desc:"Produto novo sendo testado"},
+  congelado:   {label:"Congelado",     icon:"🧊",  color:"#0891b2", bg:"#e0f2fe", desc:"Sem giro — pausado"},
+  eterno:      {label:"Et. congelado", icon:"❄️",  color:"#1e40af", bg:"#bfdbfe", desc:"Parado há muito tempo"},
+  atencao:     {label:"Precisa atenção",icon:"⚠️", color:"#d97706", bg:"#fef3c7", desc:"Giro lento — monitorar"},
+  ruim:        {label:"Ruim",          icon:"📉",  color:"#dc2626", bg:"#fee2e2", desc:"Demorou muito para vender"},
+};
+
+
+
+
+
+
+function EstoquePanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[diasCobertura,setDiasCobertura]=useState(30);
+  const[diasInput,setDiasInput]=useState("30");
+  const[busca,setBusca]=useState("");
+  const[filtroStatus,setFiltroStatus]=useState("todos");
+  const[filtroQual,setFiltroQual]=useState("todos");
+  const[abaView,setAbaView]=useState("tabela"); // tabela | saude
+  const FORM0={empresa_id:empresaId,sku:"",nome:"",custo:"",preco_venda:"",quantidade:"",venda_dia:"",lead_time:7,estoque_minimo:10,fornecedor:"",qualidade:"bom"};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.estoque(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const calc=(p)=>{
+    const q=Number(p.quantidade)||0,vd=Number(p.venda_dia)||0,lt=Number(p.lead_time)||0,min=Number(p.estoque_minimo)||0;
+    const cobertura=vd>0?q/vd:999;
+    const seg=Math.ceil(vd*lt);
+    const nec=Math.ceil(vd*diasCobertura)+seg;
+    const comprar=Math.max(0,nec-q);
+    const statusComp=q<=min?"critico":cobertura<diasCobertura?"repor":"ok";
+    return{...p,cobertura:Math.round(cobertura),seg,nec,comprar,
+      valorComprar:comprar*(Number(p.custo)||0),
+      valorEstoque:q*(Number(p.custo)||0),
+      statusComp,
+      qualidade:p.qualidade||"bom"
+    };
+  };
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId,qualidade:item.qualidade||"bom"}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.nome){alert("Preencha o nome do produto");return;}
+    await DB.saveEstoque({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delEstoque(confirmDel);setConfirmDel(null);carregar();};
+
+  const mudarQualidade=async(p,novaQual)=>{
+    await DB.saveEstoque({...p,qualidade:novaQual});
+    setDados(prev=>prev.map(d=>d.id===p.id?{...d,qualidade:novaQual}:d));
+  };
+
+  const processados=dados.map(calc);
+  const scfgComp={critico:{label:"🚨 Crítico",color:C.red,bg:C.redL},repor:{label:"⚠️ Repor",color:C.amber,bg:C.amberL},ok:{label:"✅ OK",color:C.green,bg:C.greenL}};
+  const totalEstoque=processados.reduce((s,p)=>s+p.valorEstoque,0);
+  const totalComprar=processados.reduce((s,p)=>s+p.valorComprar,0);
+
+  const vis=processados.filter(p=>
+    (filtroStatus==="todos"||p.statusComp===filtroStatus)&&
+    (filtroQual==="todos"||p.qualidade===filtroQual)&&
+    (busca===""||p.nome.toLowerCase().includes(busca.toLowerCase())||( p.sku||"").toLowerCase().includes(busca.toLowerCase()))
+  );
+
+  const saudeData=Object.entries(QUALIDADE_CFG).map(([key,cfg])=>{
+    const itens=processados.filter(p=>(p.qualidade||"bom")===key);
+    const valor=itens.reduce((s,p)=>s+p.valorEstoque,0);
+    const pct=totalEstoque>0?((valor/totalEstoque)*100):0;
+    return{key,cfg,itens,valor,pct,qtd:itens.length};
+  });
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}},React.createElement(KPI,{label:"Valor em estoque",value:"R$ "+(totalEstoque/1000).toFixed(0)+"K",sub:dados.length+" SKUs"}),React.createElement(KPI,{label:"Estoque Bom",value:"R$ "+(processados.filter(p=>(p.qualidade||"bom")==="bom").reduce((s,p)=>s+p.valorEstoque,0)/1000).toFixed(0)+"K",color:C.green}),React.createElement(KPI,{label:"Congelado+Ruim",value:"R$ "+(processados.filter(p=>["congelado","eterno","ruim"].includes(p.qualidade||"bom")).reduce((s,p)=>s+p.valorEstoque,0)/1000).toFixed(0)+"K",color:C.red}),React.createElement(KPI,{label:"Custo p/ reposição",value:"R$ "+(totalComprar/1000).toFixed(0)+"K",color:C.amber})),/* Abas */,React.createElement('div',{style:{display:"flex",gap:8,alignItems:"center"}},React.createElement('button',{onClick:()=>setAbaView("tabela"),style:{padding:"7px 16px",borderRadius:8,fontSize:12,fontWeight:500,cursor:"pointer",border:"none",background:abaView==="tabela"?C.blue:"#f3f4f6",color:abaView==="tabela"?"#fff":C.gray}},"📦 Tabela de produtos"),React.createElement('button',{onClick:()=>setAbaView("saude"),style:{padding:"7px 16px",borderRadius:8,fontSize:12,fontWeight:500,cursor:"pointer",border:"none",background:abaView==="saude"?C.blue:"#f3f4f6",color:abaView==="saude"?"#fff":C.gray}},"🌡️ Saúde do Estoque")),/* SAÚDE DO ESTOQUE */,abaView==="saude"&&(
+        React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:12}},React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}},React.createElement('div',{style:{fontSize:14,fontWeight:700,color:"#111827",marginBottom:4}},"🌡️ Saúde do Estoque"),React.createElement('div',{style:{fontSize:12,color:C.gray,marginBottom:16}},"Classificação do valor em estoque por qualidade · Total:",fmtBRL(totalEstoque)),React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:10}},saudeData.map(({key,cfg,itens,valor,pct,qtd})=>(
+                React.createElement('div',{key:key,style:{display:"flex",alignItems:"center",gap:14,padding:"12px 14px",background:cfg.bg+"80",borderRadius:10,border:`1px solid ${cfg.bg}`}},React.createElement('div',{style:{width:40,height:40,borderRadius:10,background:cfg.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}},cfg.icon),React.createElement('div',{style:{flex:1,minWidth:0}},React.createElement('div',{style:{display:"flex",justifyContent:"space-between",marginBottom:6}},React.createElement('div',null,React.createElement('span',{style:{fontSize:13,fontWeight:600,color:cfg.color}},cfg.label),React.createElement('span',{style:{fontSize:11,color:C.gray,marginLeft:8}},cfg.desc)),React.createElement('div',{style:{textAlign:"right",flexShrink:0}},React.createElement('div',{style:{fontSize:14,fontWeight:700,color:cfg.color}},fmtBRL(valor)),React.createElement('div',{style:{fontSize:11,color:C.gray}},qtd,"produto",qtd!==1?"s":"","·",pct.toFixed(2),"%"))),React.createElement('div',{style:{background:"rgba(0,0,0,0.08)",borderRadius:100,height:7,overflow:"hidden"}},React.createElement('div',{style:{height:"100%",width:`${pct}%`,background:cfg.color,borderRadius:100,transition:"width .5s",minWidth:pct>0?4:0}}))))
+              )))),saudeData.filter(s=>s.qtd>0).map(({key,cfg,itens})=>(
+            React.createElement('div',{key:key,style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}},React.createElement('div',{style:{display:"flex",alignItems:"center",gap:8,marginBottom:12}},React.createElement('span',{style:{fontSize:18}},cfg.icon),React.createElement('span',{style:{fontSize:13,fontWeight:600,color:cfg.color}},cfg.label),React.createElement('span',{style:{fontSize:11,color:C.gray}},"—",itens.length,"produto",itens.length!==1?"s":"")),React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},React.createElement('thead',null,React.createElement('tr',{style:{background:"#f9fafb"}},["SKU","Produto","Qtd","Valor estoque","Cobertura","Alterar classificação"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"7px 10px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11}}>{h}</th>))),React.createElement('tbody',null,itens.map((p,i)=>(
+                  <tr key={p.id||i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                    <td style={{padding:"7px 10px",color:C.gray,fontFamily:"monospace",fontSize:11}}>{p.sku||"—"}</td>
+                    <td style={{padding:"7px 10px",fontWeight:500,color:"#374151"}}>{p.nome}</td>
+                    <td style={{padding:"7px 10px",color:"#374151"}}>{p.quantidade} un.</td>
+                    <td style={{padding:"7px 10px",fontWeight:600,color:"#374151"}}>{fmtBRL(p.valorEstoque)}</td>
+                    <td style={{padding:"7px 10px",color:p.cobertura<diasCobertura?C.amber:C.green,fontWeight:600}}>{p.cobertura===999?"∞":p.cobertura+"d"}</td>
+                    <td style={{padding:"7px 10px"}}>
+                      <select value={p.qualidade||"bom"} onChange={e=>mudarQualidade(p,e.target.value)}
+                        style={{fontSize:11,padding:"3px 6px",borderRadius:6,border:"1px solid #e5e7eb",background:"#fff",cursor:"pointer",color:QUALIDADE_CFG[p.qualidade||"bom"]?.color}}>
+                        {Object.entries(QUALIDADE_CFG).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}
+                      </select>
+                    </td>
+                  </tr>
+                )))))
+          )))
+      ),/* TABELA */,abaView==="tabela"&&(
+        React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:12}},React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:14}},React.createElement('div',{style:{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}},React.createElement('div',null,React.createElement('div',{style:{fontSize:12,fontWeight:600}},"⚙️ Cobertura de compra"),React.createElement('div',{style:{fontSize:11,color:C.gray}},"Quantos dias de estoque garantir")),React.createElement('div',{style:{display:"flex",alignItems:"center",gap:8,marginLeft:"auto",flexWrap:"wrap"}},[7,15,30,45,60,90].map(d=>(
+                  React.createElement('button',{key:d,onClick:()=>{setDiasCobertura(d);setDiasInput(String(d));},style:{padding:"5px 12px",borderRadius:7,fontSize:12,fontWeight:500,cursor:"pointer",border:"none",background:diasCobertura===d?C.blue:"#f3f4f6",color:diasCobertura===d?"#fff":C.gray}},d,"d")
+                )),React.createElement('div',{style:{display:"flex",alignItems:"center",gap:4}},React.createElement('input',{value:diasInput,onChange:e=>setDiasInput(e.target.value),onBlur:()=>{const v=parseInt(diasInput);if(v>0)setDiasCobertura(v);},style:{width:56,padding:"5px 8px",borderRadius:7,border:"1px solid #e5e7eb",fontSize:12,textAlign:"center"},placeholder:"Outro"}),React.createElement('span',{style:{fontSize:12,color:C.gray}},"dias"))))),React.createElement('div',{style:{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},React.createElement('input',{value:busca,onChange:e=>setBusca(e.target.value),placeholder:"Buscar produto ou SKU...",style:{flex:1,...inp,minWidth:160}}),React.createElement('select',{value:filtroQual,onChange:e=>setFiltroQual(e.target.value),style:{...inp,width:"auto",padding:"7px 10px"}},React.createElement('option',{value:"todos"},"Todas classificações"),Object.entries(QUALIDADE_CFG).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)),["todos","critico","repor","ok"].map(f=>(
+              React.createElement('button',{key:f,onClick:()=>setFiltroStatus(f),style:{padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",background:filtroStatus===f?C.blue:"#f3f4f6",color:filtroStatus===f?"#fff":C.gray}},f==="todos"?"Todos comp.":scfgComp[f]?.label||f)
+            )),!(!empresaId)&&React.createElement('button',{onClick:()=>abrir(),style:{...btnP,whiteSpace:"nowrap"}},"+ Produto")),React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}},loading?React.createElement('div',{style:{padding:40,textAlign:"center"}},React.createElement(Spinner,null)):vis.length===0?React.createElement(Empty,null):(
+              React.createElement('div',{style:{overflowX:"auto"}},React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:1000}},React.createElement('thead',null,React.createElement('tr',{style:{background:"#f9fafb"}},["Qualidade","Produto","Qtd","Venda/dia","Cobertura","Comprar","Val. estoque","Status","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11,whiteSpace:"nowrap"}}>{h}</th>))),React.createElement('tbody',null,vis.map((p,i)=>{
+                    const sc=scfgComp[p.statusComp];
+                    const qc=QUALIDADE_CFG[p.qualidade||"bom"];
+                    React.createElement('tr',{key:p.id||i,style:{borderBottom:"1px solid #f3f4f6",background:p.statusComp==="critico"?"#fff9f9":"#fff"}},
+  React.createElement('td',{style:{padding:"9px 12px"}},
+    React.createElement('select',{value:p.qualidade||"bom",onChange:e=>mudarQualidade(p,e.target.value),style:{fontSize:11,padding:"3px 7px",borderRadius:6,border:`1px solid ${qc.color}40`,background:qc.bg,color:qc.color,fontWeight:600,cursor:"pointer"}},
+      Object.entries(QUALIDADE_CFG).map(([k,v])=>React.createElement('option',{key:k,value:k},v.icon+" "+v.label))
+    )
+  ),
+  React.createElement('td',{style:{padding:"9px 12px"}},
+    React.createElement('div',{style:{fontWeight:600,color:"#111827"}},p.nome),
+    React.createElement('div',{style:{fontSize:10,color:C.gray}},(p.sku||"")+(p.fornecedor?" · "+p.fornecedor:""))
+  ),
+  React.createElement('td',{style:{padding:"9px 12px",fontWeight:600,color:p.quantidade<=p.estoque_minimo?C.red:"#374151"}},
+    String(p.quantidade),
+    React.createElement('div',{style:{fontSize:10,color:C.gray}},"mín:"+p.estoque_minimo)
+  ),
+  React.createElement('td',{style:{padding:"9px 12px"}},String(Number(p.venda_dia).toFixed(1))),
+  React.createElement('td',{style:{padding:"9px 12px"}},
+    React.createElement('span',{style:{fontWeight:600,color:p.cobertura<diasCobertura?C.amber:C.green}},p.cobertura===999?"∞":p.cobertura+"d"),
+    React.createElement('div',{style:{marginTop:3,background:"#f3f4f6",borderRadius:100,height:4,width:60}},
+      React.createElement('div',{style:{height:"100%",width:`${Math.min(100,(p.cobertura/diasCobertura)*100)}%`,background:p.cobertura>=diasCobertura?C.green:C.amber,borderRadius:100}})
+    )
+  ),
+  React.createElement('td',{style:{padding:"9px 12px",fontWeight:700,color:p.comprar>0?C.blue:C.gray}},p.comprar>0?p.comprar+" un.":"—"),
+  React.createElement('td',{style:{padding:"9px 12px"}},fmtBRL(p.valorEstoque)),
+  React.createElement('td',{style:{padding:"9px 12px"}},
+    React.createElement('span',{style:{fontSize:10,fontWeight:600,padding:"2px 7px",borderRadius:100,background:sc.bg,color:sc.color}},sc.label)
+  ),
+  React.createElement('td',{style:{padding:"9px 12px"}},
+    React.createElement('div',{style:{display:"flex",gap:4}},
+      React.createElement('button',{onClick:()=>abrir(p),style:{padding:"3px 9px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}},"✏️"),
+      React.createElement('button',{onClick:()=>setConfirmDel(p.id),style:{padding:"3px 9px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}},"🗑️")
+    )
+  )
+);
+                  }))))
+            ),React.createElement('div',{style:{padding:"10px 16px",borderTop:"1px solid #e5e7eb",background:"#f9fafb",fontSize:12,color:C.gray,display:"flex",gap:24,flexWrap:"wrap"}},React.createElement('span',null,"Valor visível:",React.createElement('strong',{style:{color:"#374151"}},fmtBRL(vis.reduce((s,p)=>s+p.valorEstoque,0)))),React.createElement('span',null,"A comprar:",React.createElement('strong',{style:{color:C.red}},fmtBRL(vis.reduce((s,p)=>s+p.valorComprar,0)))))))
+      ),showForm&&(
+        React.createElement(Modal,{title:editItem?"✏️ Editar produto":"+ Novo produto",onClose:()=>setShowForm(false),width:560},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Nome do produto *"},React.createElement('input',{value:form.nome,onChange:e=>setForm(f=>({...f,nome:e.target.value})),style:inp}))),React.createElement(FormField,{label:"SKU / Código"},React.createElement('input',{value:form.sku||"",onChange:e=>setForm(f=>({...f,sku:e.target.value})),style:inp})),React.createElement(FormField,{label:"Fornecedor"},React.createElement('input',{value:form.fornecedor||"",onChange:e=>setForm(f=>({...f,fornecedor:e.target.value})),style:inp})),React.createElement(FormField,{label:"Custo (R$)"},React.createElement('input',{type:"number",value:form.custo||"",onChange:e=>setForm(f=>({...f,custo:e.target.value})),style:inp})),React.createElement(FormField,{label:"Preço de venda (R$)"},React.createElement('input',{type:"number",value:form.preco_venda||"",onChange:e=>setForm(f=>({...f,preco_venda:e.target.value})),style:inp})),React.createElement(FormField,{label:"Quantidade em estoque"},React.createElement('input',{type:"number",value:form.quantidade||"",onChange:e=>setForm(f=>({...f,quantidade:e.target.value})),style:inp})),React.createElement(FormField,{label:"Venda média/dia"},React.createElement('input',{type:"number",step:"0.1",value:form.venda_dia||"",onChange:e=>setForm(f=>({...f,venda_dia:e.target.value})),style:inp})),React.createElement(FormField,{label:"Lead time (dias)"},React.createElement('input',{type:"number",value:form.lead_time||7,onChange:e=>setForm(f=>({...f,lead_time:e.target.value})),style:inp})),React.createElement(FormField,{label:"Estoque mínimo"},React.createElement('input',{type:"number",value:form.estoque_minimo||10,onChange:e=>setForm(f=>({...f,estoque_minimo:e.target.value})),style:inp})),React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Classificação de qualidade"},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:4}},Object.entries(QUALIDADE_CFG).map(([k,v])=>(
+                    React.createElement('button',{key:k,onClick:()=>setForm(f=>({...f,qualidade:k})),style:{padding:"8px 10px",borderRadius:9,border:`2px solid ${form.qualidade===k?v.color:"#e5e7eb"}`,background:form.qualidade===k?v.bg:"#fff",cursor:"pointer",textAlign:"left"}},React.createElement('div',{style:{fontSize:14,marginBottom:2}},v.icon),React.createElement('div',{style:{fontSize:12,fontWeight:600,color:v.color}},v.label),React.createElement('div',{style:{fontSize:10,color:C.gray}},v.desc))
+                  )))))),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setShowForm(false),style:btnS},"Cancelar"),React.createElement('button',{onClick:salvar,style:btnP},"💾 Salvar")))
+      ),confirmDel&&(
+        React.createElement(Modal,{title:"🗑️ Excluir produto?",onClose:()=>setConfirmDel(null),width:360},React.createElement('div',{style:{fontSize:13,color:C.gray,marginBottom:20}},"Esta ação não pode ser desfeita."),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setConfirmDel(null),style:btnS},"Cancelar"),React.createElement('button',{onClick:excluir,style:{...btnP,background:C.red}},"Excluir")))
+      ))
+  );
+}
+
+const TIPO_CFG={
+  corrente:{label:"Conta Corrente",icon:"🏦",color:"#2563eb"},
+  poupanca:{label:"Poupança",      icon:"💰",color:"#16a34a"},
+  credito: {label:"Cartão Crédito",icon:"💳",color:"#7c3aed"},
+  debito:  {label:"Cartão Débito", icon:"💴",color:"#d97706"},
+};
+const CORES_CONTA=["#2563eb","#16a34a","#7c3aed","#d97706","#dc2626","#0891b2","#065f46","#92400e"];
+const BANCOS=["Itaú","Bradesco","Santander","Banco do Brasil","Caixa","Nubank","Inter","C6 Bank","XP","BTG","Sicredi","Sicoob","Outro"];
+
+function CartaoFaturaCard({conta,contas_pagar,mesRef}){
+  const [mes,setMes]=useState(mesRef||new Date().toISOString().slice(0,7));
+  const lancamentos=contas_pagar.filter(c=>
+    c.conta_bancaria_id===conta.id &&
+    (c.competencia||c.vencimento||"").slice(0,7)===mes
+  );
+  const total=lancamentos.reduce((s,c)=>s+Number(c.valor||0),0);
+  const pago=lancamentos.filter(c=>c.status==="Pago").reduce((s,c)=>s+Number(c.valor||0),0);
+  const tc=TIPO_CFG[conta.tipo]||TIPO_CFG.corrente;
+
+  const hoje=new Date();
+  const diaFech=conta.dia_fechamento;
+  const diaVenc=conta.dia_vencimento;
+  let faturaStatus="aberta";
+  let faturaLabel="Fatura em aberto";
+  if(diaVenc){
+    const vencDt=new Date(hoje.getFullYear(),hoje.getMonth(),diaVenc);
+    if(hoje>vencDt) faturaStatus="vencida",faturaLabel="Fatura vencida";
+    else if(diaFech&&hoje.getDate()>=diaFech) faturaStatus="fechada",faturaLabel="Fatura fechada";
+  }
+  const faturaColor={aberta:C.blue,fechada:C.amber,vencida:C.red}[faturaStatus];
+
+  return(
+    React.createElement('div',{style:{background:"#fff",border:`1px solid ${conta.cor||C.blue}30`,borderRadius:12,overflow:"hidden",borderTop:`4px solid ${conta.cor||C.blue}`}},/* Header cartão */,React.createElement('div',{style:{padding:"14px 16px",background:conta.cor+"10",display:"flex",alignItems:"center",gap:12}},React.createElement('div',{style:{width:44,height:44,borderRadius:10,background:conta.cor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}},tc.icon),React.createElement('div',{style:{flex:1}},React.createElement('div',{style:{fontSize:14,fontWeight:700,color:"#111827"}},conta.nome),React.createElement('div',{style:{fontSize:11,color:C.gray}},tc.label,conta.banco?" · "+conta.banco:"",conta.ultimos_digitos?" · ····"+conta.ultimos_digitos:"")),React.createElement('div',{style:{textAlign:"right"}},conta.tipo==="credito"&&conta.limite>0&&(
+            React.createElement('div',{style:{fontSize:11,color:C.gray}},"Limite:",React.createElement('strong',null,fmtBRL(conta.limite)))
+          ),React.createElement('span',{style:{fontSize:10,padding:"2px 8px",borderRadius:100,background:faturaColor+"20",color:faturaColor,fontWeight:600}},faturaLabel))),/* Seletor mês */,React.createElement('div',{style:{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",gap:10}},React.createElement('span',{style:{fontSize:12,color:C.gray}},"Mês de referência:"),React.createElement('input',{type:"month",value:mes,onChange:e=>setMes(e.target.value),style:{...inp,width:160,padding:"5px 8px",fontSize:12}}),diaFech&&React.createElement('span',{style:{fontSize:11,color:C.gray}},"Fechamento: dia",diaFech),diaVenc&&React.createElement('span',{style:{fontSize:11,color:C.gray}},"Vencimento: dia",diaVenc)),/* Resumo fatura */,React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:0,borderBottom:"1px solid #f3f4f6"}},[
+          {label:"Total da fatura",value:fmtBRL(total),color:conta.cor},
+          {label:"Já pago",value:fmtBRL(pago),color:C.green},
+          {label:"Em aberto",value:fmtBRL(total-pago),color:total-pago>0?C.red:C.green},
+        ].map((it,i)=>(
+          React.createElement('div',{key:i,style:{padding:"12px 16px",borderRight:i<2?"1px solid #f3f4f6":"none",textAlign:"center"}},React.createElement('div',{style:{fontSize:11,color:C.gray,marginBottom:4}},it.label),React.createElement('div',{style:{fontSize:16,fontWeight:700,color:it.color}},it.value))
+        ))),/* Lançamentos */,lancamentos.length===0?(
+        React.createElement('div',{style:{padding:20,textAlign:"center",fontSize:12,color:"#9ca3af"}},"Nenhum lançamento neste mês")
+      ):(
+        React.createElement('div',{style:{maxHeight:200,overflowY:"auto"}},React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},React.createElement('thead',null,React.createElement('tr',{style:{background:"#f9fafb"}},["Fornecedor","Competência","Parcela","Vencimento","Valor","Status"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"7px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11}}>{h}</th>))),React.createElement('tbody',null,lancamentos.map((c,i)=>(
+              React.createElement('tr',{key:i,style:{borderBottom:"1px solid #f3f4f6"}},React.createElement('td',{style:{padding:"7px 12px",fontWeight:500,color:"#374151"}},c.fornecedor,c.fixo&&<span style={{fontSize:9,marginLeft:4,color:C.green}}>🔁</span>),React.createElement('td',{style:{padding:"7px 12px",color:C.gray}},fmtComp(c.competencia)),React.createElement('td',{style:{padding:"7px 12px"}},(c.total_parcelas||1)>1
+                    ?<span style={{fontSize:10,padding:"1px 6px",borderRadius:100,background:"#ede9fe",color:C.purple,fontWeight:600}}>{c.parcela_atual}/{c.total_parcelas}</span>
+                    :<span style={{color:"#d1d5db"}}>—</span>),React.createElement('td',{style:{padding:"7px 12px",color:C.gray}},fmtDate(c.vencimento)),React.createElement('td',{style:{padding:"7px 12px",fontWeight:600,color:C.red}},fmtBRL(c.valor)),React.createElement('td',{style:{padding:"7px 12px"}},React.createElement(Badge,{type:{Pago:"green",Atrasado:"red","Em aberto":"blue",Pendente:"amber"}[c.status]||"gray"},c.status)))
+            )))))
+      ))
+  );
+}
+
+function CartoesPanel({empresaId}){
+  const[contas,setContas]=useState([]);
+  const[pagar,setPagar]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[abaView,setAbaView]=useState("faturas"); // faturas | cadastro
+  const FORM0={empresa_id:empresaId,nome:"",tipo:"corrente",banco:"",ultimos_digitos:"",limite:"",dia_fechamento:"",dia_vencimento:"",cor:"#2563eb",ativo:true};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{
+    setLoading(true);
+    const[cb,cp]=await Promise.all([DB.contasBancarias(empresaId),DB.pagar(empresaId)]);
+    setContas(cb);setPagar(cp);setLoading(false);
+  };
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item}:FORM0);setShowForm(true);setAbaView("cadastro");};
+  const salvar=async()=>{
+    if(!form.nome){alert("Informe o nome");return;}
+    await DB.saveContaBancaria({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delContaBancaria(confirmDel);setConfirmDel(null);carregar();};
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}},React.createElement(KPI,{label:"Contas/Cartões",value:contas.length,sub:"cadastrados"}),React.createElement(KPI,{label:"Cartões crédito",value:contas.filter(c=>c.tipo==="credito").length,color:C.purple}),React.createElement(KPI,{label:"Contas corrente",value:contas.filter(c=>c.tipo==="corrente").length,color:C.blue}),React.createElement(KPI,{label:"Total em faturas",value:"R$ "+(pagar.filter(c=>contas.find(cb=>cb.id===c.conta_bancaria_id)).reduce((s,c)=>s+Number(c.valor||0),0)/1000).toFixed(0)+"K",color:C.red})),/* Abas */,React.createElement('div',{style:{display:"flex",gap:8,alignItems:"center",justifyContent:"space-between"}},React.createElement('div',{style:{display:"flex",gap:8}},React.createElement('button',{onClick:()=>setAbaView("faturas"),style:{padding:"7px 16px",borderRadius:8,fontSize:12,fontWeight:500,cursor:"pointer",border:"none",background:abaView==="faturas"?C.blue:"#f3f4f6",color:abaView==="faturas"?"#fff":C.gray}},"📊 Faturas por cartão"),React.createElement('button',{onClick:()=>setAbaView("cadastro"),style:{padding:"7px 16px",borderRadius:8,fontSize:12,fontWeight:500,cursor:"pointer",border:"none",background:abaView==="cadastro"?C.blue:"#f3f4f6",color:abaView==="cadastro"?"#fff":C.gray}},"💳 Cartões cadastrados")),!(!empresaId)&&React.createElement('button',{onClick:()=>abrir(),style:btnP},"+ Novo cartão/conta")),/* FATURAS */,abaView==="faturas"&&(
+        loading?React.createElement('div',{style:{padding:40,textAlign:"center"}},React.createElement(Spinner,null)):
+        contas.length===0?(
+          React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:40,textAlign:"center"}},React.createElement('div',{style:{fontSize:32,marginBottom:8}},"💳"),React.createElement('div',{style:{fontSize:13,fontWeight:500,color:"#374151",marginBottom:4}},"Nenhum cartão ou conta cadastrado"),React.createElement('div',{style:{fontSize:12,color:C.gray,marginBottom:16}},"Cadastre seus cartões para ver as faturas organizadas"),React.createElement('button',{onClick:()=>{abrir();setAbaView("cadastro");},style:btnP},"+ Cadastrar primeiro cartão"))
+        ):(
+          React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},contas.map(conta=>(
+              React.createElement(CartaoFaturaCard,{key:conta.id,conta:conta,contas_pagar:pagar,mesRef:new Date().toISOString().slice(0,7)})
+            )))
+        )
+      ),/* CADASTRO */,abaView==="cadastro"&&(
+        React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:12}},loading?React.createElement('div',{style:{padding:40,textAlign:"center"}},React.createElement(Spinner,null)):
+          contas.length===0?React.createElement(Empty,{msg:"Nenhum cartão ou conta cadastrado"}):(
+            contas.map(c=>{
+              const tc=TIPO_CFG[c.tipo]||TIPO_CFG.corrente;
+              return(
+                React.createElement('div',{key:c.id,style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16,display:"flex",alignItems:"center",gap:14}},React.createElement('div',{style:{width:44,height:44,borderRadius:10,background:c.cor||C.blue,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}},tc.icon),React.createElement('div',{style:{flex:1}},React.createElement('div',{style:{fontSize:13,fontWeight:600,color:"#111827"}},c.nome,c.ultimos_digitos&&<span style={{fontSize:11,color:C.gray,marginLeft:8}}>····{c.ultimos_digitos}</span>),React.createElement('div',{style:{fontSize:11,color:C.gray,marginTop:2}},tc.label,c.banco?" · "+c.banco:""),React.createElement('div',{style:{display:"flex",gap:12,marginTop:4,fontSize:11,color:C.gray}},c.limite>0&&<span>Limite: <strong>{fmtBRL(c.limite)}</strong></span>,c.dia_fechamento&&<span>Fechamento: <strong>dia {c.dia_fechamento}</strong></span>,c.dia_vencimento&&<span>Vencimento: <strong>dia {c.dia_vencimento}</strong></span>)),React.createElement('div',{style:{display:"flex",gap:6}},React.createElement('button',{onClick:()=>abrir(c),style:{padding:"6px 12px",borderRadius:8,border:"1px solid #e5e7eb",background:"#fff",fontSize:12,cursor:"pointer"}},"✏️ Editar"),React.createElement('button',{onClick:()=>setConfirmDel(c.id),style:{padding:"6px 12px",borderRadius:8,background:C.redL,border:"none",fontSize:12,cursor:"pointer",color:C.red}},"🗑️")))
+              );
+            })
+          ))
+      ),/* MODAL */,showForm&&(
+        React.createElement(Modal,{title:editItem?"✏️ Editar cartão/conta":"💳 Novo cartão ou conta",onClose:()=>setShowForm(false),width:560},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement('div',{style:{fontSize:11,color:C.gray,marginBottom:6,fontWeight:500}},"Tipo"),React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}},Object.entries(TIPO_CFG).map(([k,v])=>(
+                  React.createElement('button',{key:k,onClick:()=>setForm(f=>({...f,tipo:k})),style:{padding:"10px 8px",borderRadius:9,border:`2px solid ${form.tipo===k?v.color:"#e5e7eb"}`,background:form.tipo===k?v.color+"15":"#fff",cursor:"pointer",textAlign:"center"}},React.createElement('div',{style:{fontSize:20,marginBottom:3}},v.icon),React.createElement('div',{style:{fontSize:11,fontWeight:600,color:v.color}},v.label))
+                )))),React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Nome do cartão/conta *"},React.createElement('input',{value:form.nome,onChange:e=>setForm(f=>({...f,nome:e.target.value})),placeholder:"Ex: Nubank Roxinho, Itaú Corrente...",style:inp}))),React.createElement(FormField,{label:"Banco"},React.createElement('select',{value:form.banco||"",onChange:e=>setForm(f=>({...f,banco:e.target.value})),style:inp},React.createElement('option',{value:""},"Selecione..."),BANCOS.map(b=><option key={b}>{b}</option>))),React.createElement(FormField,{label:"Últimos 4 dígitos"},React.createElement('input',{value:form.ultimos_digitos||"",onChange:e=>setForm(f=>({...f,ultimos_digitos:e.target.value.slice(0,4)})),placeholder:"1234",maxLength:4,style:inp})),form.tipo==="credito"&&React.createElement(FormField,{label:"Limite (R$)"},React.createElement('input',{type:"number",value:form.limite||"",onChange:e=>setForm(f=>({...f,limite:e.target.value})),style:inp})),(form.tipo==="credito"||form.tipo==="debito")&&React.createElement(FormField,{label:"Dia fechamento fatura"},React.createElement('input',{type:"number",min:"1",max:"31",value:form.dia_fechamento||"",onChange:e=>setForm(f=>({...f,dia_fechamento:e.target.value})),placeholder:"Ex: 15",style:inp})),React.createElement(FormField,{label:"Dia vencimento fatura"},React.createElement('input',{type:"number",min:"1",max:"31",value:form.dia_vencimento||"",onChange:e=>setForm(f=>({...f,dia_vencimento:e.target.value})),placeholder:"Ex: 5",style:inp})),React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement('div',{style:{fontSize:11,color:C.gray,marginBottom:6,fontWeight:500}},"Cor de identificação"),React.createElement('div',{style:{display:"flex",gap:8,flexWrap:"wrap"}},CORES_CONTA.map(cor=><button key={cor} onClick={()=>setForm(f=>({...f,cor}))} style={{width:28,height:28,borderRadius:"50%",background:cor,border:`3px solid ${form.cor===cor?"#111":"transparent"}`,cursor:"pointer"}}/>)))),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setShowForm(false),style:btnS},"Cancelar"),React.createElement('button',{onClick:salvar,style:btnP},"💾 Salvar")))
+      ),confirmDel&&(
+        React.createElement(Modal,{title:"🗑️ Excluir cartão/conta?",onClose:()=>setConfirmDel(null),width:360},React.createElement('div',{style:{fontSize:13,color:C.gray,marginBottom:20}},"As contas a pagar vinculadas não serão excluídas."),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setConfirmDel(null),style:btnS},"Cancelar"),React.createElement('button',{onClick:excluir,style:{...btnP,background:C.red}},"Excluir")))
+      ))
+  );
+}
+
+function DevolucoesPanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[busca,setBusca]=useState("");
+  const[filtro,setFiltro]=useState("todos");
+  const MOTIVOS=["Produto com defeito","Produto diferente do pedido","Arrependimento","Danificado na entrega","Prazo excedido","Outro"];
+  const DESTINOS=["Volta ao estoque","Avaria / Descarte","Análise técnica","Devolução ao fornecedor"];
+  const STATUS_LIST=["Em análise","Aguardando produto","Reembolso pendente","Concluída","Recusada"];
+  const statusBadge={"Em análise":"amber","Aguardando produto":"blue","Reembolso pendente":"purple",Concluída:"green",Recusada:"red"};
+  const FORM0={empresa_id:empresaId,cliente:"",pedido:"",produto:"",quantidade:1,valor_venda:"",reembolso:"",motivo:MOTIVOS[0],destino:DESTINOS[0],status:"Em análise",observacoes:""};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.devolucoes(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.cliente||!form.produto){alert("Preencha cliente e produto");return;}
+    await DB.saveDevolvucao({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delDevolucao(confirmDel);setConfirmDel(null);carregar();};
+  const avancar=async(item)=>{
+    const idx=STATUS_LIST.indexOf(item.status);
+    if(idx<STATUS_LIST.length-1){
+      await DB.saveDevolvucao({...item,status:STATUS_LIST[idx+1]});
+      carregar();
+    }
+  };
+
+  const vis=dados.filter(d=>(filtro==="todos"||d.status===filtro)&&(busca===""||[d.cliente,d.produto,d.pedido||""].some(v=>v.toLowerCase().includes(busca.toLowerCase()))));
+  const totalReembolso=dados.reduce((s,d)=>s+Number(d.reembolso||0),0);
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}},React.createElement(KPI,{label:"Total devoluções",value:dados.length,sub:"R$ "+(totalReembolso/1000).toFixed(1)+"K em reembolsos"}),React.createElement(KPI,{label:"Em análise",value:dados.filter(d=>d.status==="Em análise").length,color:C.amber}),React.createElement(KPI,{label:"Concluídas",value:dados.filter(d=>d.status==="Concluída").length,color:C.green}),React.createElement(KPI,{label:"Reembolso pendente",value:dados.filter(d=>d.status==="Reembolso pendente").length,color:C.purple})),React.createElement('div',{style:{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}},React.createElement('input',{value:busca,onChange:e=>setBusca(e.target.value),placeholder:"Buscar cliente, produto...",style:{flex:1,...inp}}),["todos",...STATUS_LIST].map(f=>(
+          React.createElement('button',{key:f,onClick:()=>setFiltro(f),style:{padding:"6px 10px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",whiteSpace:"nowrap",background:filtro===f?C.blue:"#f3f4f6",color:filtro===f?"#fff":C.gray}},f==="todos"?"Todos":f)
+        )),!(!empresaId)&&React.createElement('button',{onClick:()=>abrir(),style:{...btnP,whiteSpace:"nowrap"}},"+ Nova")),React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}},loading?React.createElement('div',{style:{padding:40,textAlign:"center"}},React.createElement(Spinner,null)):vis.length===0?React.createElement(Empty,null):(
+          React.createElement('div',{style:{overflowX:"auto"}},React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:900}},React.createElement('thead',null,React.createElement('tr',{style:{background:"#f9fafb"}},["Data","Cliente","Produto","Qtd","Reembolso","Motivo","Destino","Status","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:11,whiteSpace:"nowrap"}}>{h}</th>))),React.createElement('tbody',null,vis.map((d,i)=>(
+                React.createElement('tr',{key:d.id||i,style:{borderBottom:"1px solid #f3f4f6"}},React.createElement('td',{style:{padding:"9px 12px",color:C.gray,whiteSpace:"nowrap"}},fmtDate(d.data)),React.createElement('td',{style:{padding:"9px 12px",fontWeight:500,color:"#111827"}},d.cliente),React.createElement('td',{style:{padding:"9px 12px",color:"#374151",maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},d.produto),React.createElement('td',{style:{padding:"9px 12px",textAlign:"center"}},d.quantidade),React.createElement('td',{style:{padding:"9px 12px",fontWeight:600,color:C.red,whiteSpace:"nowrap"}},fmtBRL(d.reembolso)),React.createElement('td',{style:{padding:"9px 12px",color:C.gray,fontSize:11,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},d.motivo),React.createElement('td',{style:{padding:"9px 12px",fontSize:11,whiteSpace:"nowrap"}},d.destino),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement(Badge,{type:statusBadge[d.status]||"gray"},d.status)),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement('div',{style:{display:"flex",gap:3}},STATUS_LIST.indexOf(d.status)<STATUS_LIST.length-1&&<button onClick={()=>avancar(d)} style={{padding:"3px 7px",borderRadius:6,background:"#eff6ff",border:"none",fontSize:10,cursor:"pointer",color:C.blue,whiteSpace:"nowrap"}}>▶</button>,React.createElement('button',{onClick:()=>abrir(d),style:{padding:"3px 7px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}},"✏️"),React.createElement('button',{onClick:()=>setConfirmDel(d.id),style:{padding:"3px 7px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}},"🗑️"))))
+              )))))
+        )),showForm&&(
+        React.createElement(Modal,{title:editItem?"✏️ Editar devolução":"🔄 Registrar devolução",onClose:()=>setShowForm(false)},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},React.createElement(FormField,{label:"Cliente *"},React.createElement('input',{value:form.cliente,onChange:e=>setForm(f=>({...f,cliente:e.target.value})),style:inp})),React.createElement(FormField,{label:"Pedido de origem"},React.createElement('input',{value:form.pedido||"",onChange:e=>setForm(f=>({...f,pedido:e.target.value})),style:inp})),React.createElement(FormField,{label:"Produto *"},React.createElement('input',{value:form.produto,onChange:e=>setForm(f=>({...f,produto:e.target.value})),style:inp})),React.createElement(FormField,{label:"Quantidade"},React.createElement('input',{type:"number",value:form.quantidade,onChange:e=>setForm(f=>({...f,quantidade:e.target.value})),style:inp})),React.createElement(FormField,{label:"Valor da venda (R$)"},React.createElement('input',{type:"number",value:form.valor_venda||"",onChange:e=>setForm(f=>({...f,valor_venda:e.target.value,reembolso:e.target.value})),style:inp})),React.createElement(FormField,{label:"Valor reembolso (R$)"},React.createElement('input',{type:"number",value:form.reembolso||"",onChange:e=>setForm(f=>({...f,reembolso:e.target.value})),style:inp})),React.createElement(FormField,{label:"Motivo"},React.createElement('select',{value:form.motivo,onChange:e=>setForm(f=>({...f,motivo:e.target.value})),style:inp},MOTIVOS.map(m=><option key={m}>{m}</option>))),React.createElement(FormField,{label:"Destino"},React.createElement('select',{value:form.destino,onChange:e=>setForm(f=>({...f,destino:e.target.value})),style:inp},DESTINOS.map(d=><option key={d}>{d}</option>))),React.createElement(FormField,{label:"Status"},React.createElement('select',{value:form.status,onChange:e=>setForm(f=>({...f,status:e.target.value})),style:inp},STATUS_LIST.map(s=><option key={s}>{s}</option>))),React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Observações"},React.createElement('textarea',{value:form.observacoes||"",onChange:e=>setForm(f=>({...f,observacoes:e.target.value})),rows:2,style:{...inp,resize:"vertical"}})))),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setShowForm(false),style:btnS},"Cancelar"),React.createElement('button',{onClick:salvar,style:btnP},"💾 Salvar")))
+      ),confirmDel&&(
+        React.createElement(Modal,{title:"🗑️ Excluir?",onClose:()=>setConfirmDel(null),width:360},React.createElement('div',{style:{fontSize:13,color:C.gray,marginBottom:20}},"Esta ação não pode ser desfeita."),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setConfirmDel(null),style:btnS},"Cancelar"),React.createElement('button',{onClick:excluir,style:{...btnP,background:C.red}},"Excluir")))
+      ))
+  );
+}
+
+function ContatosPanel({empresaId}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[confirmDel,setConfirmDel]=useState(null);
+  const[busca,setBusca]=useState("");
+  const[filtro,setFiltro]=useState("todos");
+  const FORM0={empresa_id:empresaId,nome:"",tipo:"Cliente",cnpj_cpf:"",cidade:"",status:"Ativo"};
+  const[form,setForm]=useState(FORM0);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.contatos(empresaId);setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[empresaId]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,empresa_id:empresaId}:FORM0);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.nome){alert("Preencha o nome");return;}
+    await DB.saveContato({...form,empresa_id:empresaId});
+    setShowForm(false);carregar();
+  };
+  const excluir=async()=>{await DB.delContato(confirmDel);setConfirmDel(null);carregar();};
+
+  const vis=dados.filter(c=>(filtro==="todos"||c.tipo===filtro)&&(busca===""||c.nome.toLowerCase().includes(busca.toLowerCase())));
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}},React.createElement(KPI,{label:"Total",value:dados.length,sub:"cadastros"}),React.createElement(KPI,{label:"Clientes",value:dados.filter(c=>c.tipo==="Cliente").length,color:C.blue}),React.createElement(KPI,{label:"Fornecedores",value:dados.filter(c=>c.tipo==="Fornecedor").length,color:C.amber})),React.createElement('div',{style:{display:"flex",gap:10,alignItems:"center"}},React.createElement('input',{value:busca,onChange:e=>setBusca(e.target.value),placeholder:"Buscar nome...",style:{flex:1,...inp}}),["todos","Cliente","Fornecedor"].map(f=>(
+          React.createElement('button',{key:f,onClick:()=>setFiltro(f),style:{padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:500,cursor:"pointer",border:"none",background:filtro===f?C.blue:"#f3f4f6",color:filtro===f?"#fff":C.gray}},f==="todos"?"Todos":f+"s")
+        )),!(!empresaId)&&React.createElement('button',{onClick:()=>abrir(),style:{...btnP,whiteSpace:"nowrap"}},"+ Cadastrar")),React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}},loading?React.createElement('div',{style:{padding:40,textAlign:"center"}},React.createElement(Spinner,null)):vis.length===0?React.createElement(Empty,null):(
+          React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},React.createElement('thead',null,React.createElement('tr',{style:{background:"#f9fafb"}},["Nome","Tipo","CNPJ/CPF","Cidade","Status","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 12px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:12}}>{h}</th>))),React.createElement('tbody',null,vis.map((c,i)=>(
+              React.createElement('tr',{key:c.id||i,style:{borderBottom:"1px solid #f3f4f6"}},React.createElement('td',{style:{padding:"9px 12px",fontWeight:500,color:"#111827"}},c.nome),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement(Badge,{type:c.tipo==="Cliente"?"blue":"amber"},c.tipo)),React.createElement('td',{style:{padding:"9px 12px",color:C.gray}},c.cnpj_cpf||"—"),React.createElement('td',{style:{padding:"9px 12px",color:C.gray}},c.cidade||"—"),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement(Badge,{type:c.status==="Ativo"?"green":"red"},c.status)),React.createElement('td',{style:{padding:"9px 12px"}},React.createElement('div',{style:{display:"flex",gap:4}},React.createElement('button',{onClick:()=>abrir(c),style:{padding:"3px 9px",borderRadius:6,background:"#f3f4f6",border:"none",fontSize:11,cursor:"pointer"}},"✏️"),React.createElement('button',{onClick:()=>setConfirmDel(c.id),style:{padding:"3px 9px",borderRadius:6,background:C.redL,border:"none",fontSize:11,cursor:"pointer",color:C.red}},"🗑️"))))
+            ))))
+        )),showForm&&(
+        React.createElement(Modal,{title:editItem?"✏️ Editar cadastro":"+ Novo cadastro",onClose:()=>setShowForm(false)},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Nome *"},React.createElement('input',{value:form.nome,onChange:e=>setForm(f=>({...f,nome:e.target.value})),style:inp}))),React.createElement(FormField,{label:"Tipo"},React.createElement('select',{value:form.tipo,onChange:e=>setForm(f=>({...f,tipo:e.target.value})),style:inp},React.createElement('option',null,"Cliente"),React.createElement('option',null,"Fornecedor"))),React.createElement(FormField,{label:"CNPJ / CPF"},React.createElement('input',{value:form.cnpj_cpf||"",onChange:e=>setForm(f=>({...f,cnpj_cpf:e.target.value})),style:inp})),React.createElement(FormField,{label:"Cidade"},React.createElement('input',{value:form.cidade||"",onChange:e=>setForm(f=>({...f,cidade:e.target.value})),style:inp})),React.createElement(FormField,{label:"Status"},React.createElement('select',{value:form.status,onChange:e=>setForm(f=>({...f,status:e.target.value})),style:inp},React.createElement('option',null,"Ativo"),React.createElement('option',null,"Inativo"),React.createElement('option',null,"Inadimplente")))),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setShowForm(false),style:btnS},"Cancelar"),React.createElement('button',{onClick:salvar,style:btnP},"💾 Salvar")))
+      ),confirmDel&&(
+        React.createElement(Modal,{title:"🗑️ Excluir cadastro?",onClose:()=>setConfirmDel(null),width:360},React.createElement('div',{style:{fontSize:13,color:C.gray,marginBottom:20}},"Esta ação não pode ser desfeita."),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setConfirmDel(null),style:btnS},"Cancelar"),React.createElement('button',{onClick:excluir,style:{...btnP,background:C.red}},"Excluir")))
+      ))
+  );
+}
+
+function EmpresasPanel({onReload}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[editItem,setEditItem]=useState(null);
+  const[showForm,setShowForm]=useState(false);
+  const[form,setForm]=useState({});
+  const[showToken,setShowToken]=useState(false);
+  const SEGS=["Comércio","Serviços","Indústria","Tecnologia","Saúde","Educação","Outro"];
+  const REGS=["Simples Nacional","Lucro Presumido","Lucro Real","MEI"];
+  const ICONS=["🏢","🏗️","🛒","💻","🏥","🎓","🏭","🚚"];
+  const CORES=[C.blue,C.green,C.purple,C.amber,"#e11d48","#0891b2","#065f46"];
+  const FORM0={nome:"",cnpj:"",segmento:"Comércio",regime:"Simples Nacional",icon:"🏢",cor:C.blue,olist_token:""};
+
+  const carregar=async()=>{setLoading(true);const d=await DB.empresas();setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[]);
+
+  const abrir=(item=null)=>{setEditItem(item);setForm(item?{...item,olist_token:item.olist_token||""}:FORM0);setShowToken(false);setShowForm(true);};
+  const salvar=async()=>{
+    if(!form.nome){alert("Informe o nome da empresa");return;}
+    await DB.saveEmpresa(form);
+    setShowForm(false);carregar();onReload();
+  };
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between"}},React.createElement('div',null,React.createElement('div',{style:{fontSize:14,fontWeight:600}},"🏢 Empresas / CNPJs"),React.createElement('div',{style:{fontSize:12,color:C.gray}},"Cada empresa tem seu próprio token Olist e dados financeiros independentes")),React.createElement('button',{onClick:()=>abrir(),style:btnP},"+ Adicionar empresa")),loading?React.createElement('div',{style:{padding:40,textAlign:"center"}},React.createElement(Spinner,null)):dados.length===0?React.createElement(Empty,{msg:"Nenhuma empresa cadastrada. Adicione sua primeira empresa!"}):(
+        dados.map(emp=>(
+          React.createElement('div',{key:emp.id,style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}},React.createElement('div',{style:{display:"flex",alignItems:"center",gap:16}},React.createElement('div',{style:{width:48,height:48,borderRadius:12,background:(emp.cor||C.blue)+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}},emp.icon||"🏢"),React.createElement('div',{style:{flex:1}},React.createElement('div',{style:{fontSize:14,fontWeight:600,color:"#111827"}},emp.nome),React.createElement('div',{style:{fontSize:12,color:C.gray,marginTop:2}},"CNPJ:",emp.cnpj||"—"),React.createElement('div',{style:{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}},React.createElement('span',{style:{fontSize:11,padding:"2px 8px",borderRadius:100,background:(emp.cor||C.blue)+"18",color:emp.cor||C.blue,fontWeight:500}},emp.segmento),React.createElement('span',{style:{fontSize:11,padding:"2px 8px",borderRadius:100,background:"#f3f4f6",color:C.gray}},emp.regime),emp.olist_token
+                    ?React.createElement('span',{style:{fontSize:11,padding:"2px 8px",borderRadius:100,background:C.greenL,color:"#166534",fontWeight:600}},"🛒 Token Olist ✅")
+                    :React.createElement('span',{style:{fontSize:11,padding:"2px 8px",borderRadius:100,background:C.amberL,color:"#92400e",fontWeight:600}},"🛒 Token Olist não configurado"))),React.createElement('button',{onClick:()=>abrir(emp),style:{padding:"7px 14px",borderRadius:8,border:"1px solid #e5e7eb",background:"#fff",fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}},"✏️ Editar")),emp.olist_token&&(
+              React.createElement('div',{style:{marginTop:10,padding:"8px 12px",background:"#f9fafb",borderRadius:8,fontSize:11,color:C.gray,fontFamily:"monospace"}},"Token:",emp.olist_token.slice(0,20),"...")
+            ))
+        ))
+      ),showForm&&(
+        React.createElement(Modal,{title:editItem?"✏️ Editar empresa":"🏢 Nova empresa",onClose:()=>setShowForm(false),width:560},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Nome da empresa *"},React.createElement('input',{value:form.nome||"",onChange:e=>setForm(f=>({...f,nome:e.target.value})),style:inp}))),React.createElement(FormField,{label:"CNPJ"},React.createElement('input',{value:form.cnpj||"",onChange:e=>setForm(f=>({...f,cnpj:e.target.value})),placeholder:"00.000.000/0001-00",style:inp})),React.createElement(FormField,{label:"Segmento"},React.createElement('select',{value:form.segmento||"Comércio",onChange:e=>setForm(f=>({...f,segmento:e.target.value})),style:inp},SEGS.map(s=><option key={s}>{s}</option>))),React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Regime tributário"},React.createElement('select',{value:form.regime||"Simples Nacional",onChange:e=>setForm(f=>({...f,regime:e.target.value})),style:inp},REGS.map(r=><option key={r}>{r}</option>)))),React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}},React.createElement('div',{style:{fontSize:11,color:C.gray,fontWeight:500}},"🛒 Token Olist (Bearer)"),React.createElement('button',{onClick:()=>setShowToken(v=>!v),style:{fontSize:10,padding:"2px 8px",borderRadius:6,border:"1px solid #e5e7eb",background:"#fff",cursor:"pointer",color:C.gray}},showToken?"🙈 Ocultar":"👁 Mostrar")),React.createElement('input',{type:showToken?"text":"password",value:form.olist_token||"",onChange:e=>setForm(f=>({...f,olist_token:e.target.value})),placeholder:"Cole o token Bearer do Olist desta empresa...",style:{...inp,fontFamily:"monospace",fontSize:12}}),React.createElement('div',{style:{fontSize:11,color:"#9ca3af",marginTop:4}},"No Olist: Configurações → Extensões → Token API → Gerar token"),form.olist_token&&(
+                React.createElement('div',{style:{marginTop:6,padding:"6px 10px",background:C.greenL,borderRadius:6,fontSize:11,color:"#166534"}},"✅ Token configurado — será usado automaticamente ao importar dados desta empresa")
+              )),React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Ícone"},React.createElement('div',{style:{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}},ICONS.map(ic=><button key={ic} onClick={()=>setForm(f=>({...f,icon:ic}))} style={{width:36,height:36,borderRadius:8,border:`2px solid ${form.icon===ic?C.blue:"#e5e7eb"}`,background:"#fff",fontSize:18,cursor:"pointer"}}>{ic}</button>)))),React.createElement('div',{style:{gridColumn:"1/-1"}},React.createElement(FormField,{label:"Cor"},React.createElement('div',{style:{display:"flex",gap:8,marginTop:4}},CORES.map(cor=><button key={cor} onClick={()=>setForm(f=>({...f,cor}))} style={{width:28,height:28,borderRadius:"50%",background:cor,border:`3px solid ${form.cor===cor?"#111":"transparent"}`,cursor:"pointer"}}/> ))))),React.createElement('div',{style:{display:"flex",gap:8,justifyContent:"flex-end"}},React.createElement('button',{onClick:()=>setShowForm(false),style:btnS},"Cancelar"),React.createElement('button',{onClick:salvar,style:btnP},"💾 Salvar")))
+      ))
+  );
+}
+
+function UsuariosPanel({usuarioAtual}){
+  const[dados,setDados]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showForm,setShowForm]=useState(false);
+  const[form,setForm]=useState({nome:"",email:"",senha:""});
+  const[erro,setErro]=useState("");
+  const[confirmDel,setConfirmDel]=useState(null);
+
+  const carregar=async()=>{setLoading(true);const d=await DB.usuarios();setDados(d);setLoading(false);};
+  useEffect(()=>{carregar();},[]);
+
+  const adicionar=async()=>{
+    if(!form.nome||!form.email||!form.senha){setErro("Preencha todos os campos");return;}
+    if(form.senha.length<6){setErro("Senha mínima de 6 caracteres");return;}
+    setErro("");
+    const r=await DB.criarUsuario(form.nome,form.email,form.senha);
+    if(r.erro){setErro("E-mail já cadastrado");return;}
+    setShowForm(false);setForm({nome:"",email:"",senha:""});carregar();
+  };
+  const excluir=async()=>{
+    if(confirmDel===usuarioAtual.id){alert("Você não pode excluir sua própria conta.");return;}
+    await DB.delUsuario(confirmDel);setConfirmDel(null);carregar();
+  };
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between"}},React.createElement('div',null,React.createElement('div',{style:{fontSize:14,fontWeight:600}},"👥 Usuários do sistema"),React.createElement('div',{style:{fontSize:12,color:C.gray}},"Gerencie quem pode acessar o FinGroup")),React.createElement('button',{onClick:()=>setShowForm(v=>!v),style:btnP},"+ Novo usuário")),showForm&&(
+        React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}},React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}},React.createElement(FormField,{label:"Nome"},React.createElement('input',{value:form.nome,onChange:e=>setForm(f=>({...f,nome:e.target.value})),style:inp})),React.createElement(FormField,{label:"E-mail"},React.createElement('input',{value:form.email,onChange:e=>setForm(f=>({...f,email:e.target.value})),type:"email",style:inp})),React.createElement(FormField,{label:"Senha (mín. 6)"},React.createElement('input',{value:form.senha,onChange:e=>setForm(f=>({...f,senha:e.target.value})),type:"password",style:inp}))),erro&&React.createElement('div',{style:{fontSize:12,color:C.red,marginBottom:8}},"⚠️",erro),React.createElement('div',{style:{display:"flex",gap:8}},React.createElement('button',{onClick:adicionar,style:{...btnP,background:C.green}},"✅ Criar"),React.createElement('button',{onClick:()=>{setShowForm(false);setErro("");},style:btnS},"Cancelar")))
+      ),React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}},loading?React.createElement('div',{style:{padding:40,textAlign:"center"}},React.createElement(Spinner,null)):dados.length===0?React.createElement(Empty,null):(
+          React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},React.createElement('thead',null,React.createElement('tr',{style:{background:"#f9fafb"}},["Nome","E-mail","Cadastrado em","Ações"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"10px 14px",color:C.gray,fontWeight:500,borderBottom:"1px solid #e5e7eb",fontSize:12}}>{h}</th>))),React.createElement('tbody',null,dados.map((u,i)=>(
+              React.createElement('tr',{key:u.id,style:{borderBottom:"1px solid #f3f4f6",background:u.id===usuarioAtual.id?"#eff6ff":"#fff"}},React.createElement('td',{style:{padding:"10px 14px",fontWeight:500,color:"#111827"}},u.nome,u.id===usuarioAtual.id&&<span style={{fontSize:10,padding:"1px 6px",borderRadius:100,background:"#dbeafe",color:C.blueDk}}>você</span>),React.createElement('td',{style:{padding:"10px 14px",color:C.gray}},u.email),React.createElement('td',{style:{padding:"10px 14px",color:C.gray,fontSize:12}},new Date(u.criado_em).toLocaleDateString("pt-BR")),React.createElement('td',{style:{padding:"10px 14px"}},u.id!==usuarioAtual.id&&(
+                    confirmDel===u.id?(
+                      <div style={{display:"flex",gap:6}}>
+                        <button onClick={excluir} style={{padding:"4px 10px",borderRadius:6,background:C.red,border:"none",color:"#fff",fontSize:11,cursor:"pointer"}}>Confirmar</button>
+                        <button onClick={()=>setConfirmDel(null)} style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e5e7eb",background:"#fff",fontSize:11,cursor:"pointer"}}>Cancelar</button>
+                      </div>
+                    ):(
+                      <button onClick={()=>setConfirmDel(u.id)} style={{padding:"4px 10px",borderRadius:6,background:C.redL,border:"none",color:C.red,fontSize:11,cursor:"pointer"}}>🗑️ Remover</button>
+                    )
+                  )))
+            ))))
+        )))
+  );
+}
+
+const OLIST_TOKEN_KEY="fingroup_olist_token_legacy";
+
+function OlistPanel({empresaId,empresaInfo}){
+  const token=empresaInfo?.olist_token||"";
+  const[step,setStep]=useState("idle");
+  const[loading,setLoading]=useState(false);
+  const[produtos,setProdutos]=useState([]);
+  const[pedidos,setPedidos]=useState([]);
+  const[selProd,setSelProd]=useState([]);
+  const[selPed,setSelPed]=useState([]);
+  const[msg,setMsg]=useState("");
+  const[erro,setErro]=useState("");
+  const[dataIni,setDataIni]=useState(new Date(Date.now()-30*86400000).toISOString().slice(0,10));
+  const[dataFim,setDataFim]=useState(new Date().toISOString().slice(0,10));
+  const[importLog,setImportLog]=useState([]);
+  const SITUACAO={0:"Aberta",1:"Faturada",2:"Cancelada",3:"Aprovada",4:"Prep. Envio",5:"Enviada",6:"Entregue",7:"Pronto Envio",9:"Não Entregue"};
+
+  const buscarProdutos=async()=>{
+    if(!token){setErro("Configure o token Olist na empresa (🏢 Gerenciar empresas → Editar)");return;}
+    if(!empresaId){setErro("Selecione uma empresa no menu lateral");return;}
+    setLoading(true);setErro("");setMsg("Buscando produtos no Olist...");
+    try{
+      const olistUrl="https://api.tiny.com.br/public-api/v3/produtos?limit=100&situacao=A";
+      const proxyUrl="https://corsproxy.io/?"+encodeURIComponent(olistUrl);
+      const res=await fetch(proxyUrl,{headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"}});
+      if(res.status===401){setErro("Token inválido. Atualize em 🏢 Gerenciar empresas.");setLoading(false);setMsg("");return;}
+      if(res.ok){
+        const data=await res.json();
+        const itens=(data?.itens||[]).map(p=>({sku:p.sku||p.codigo||"",nome:p.nome||p.descricao||"Produto",custo:Number(p.precoCusto||0),preco_venda:Number(p.precoVenda||0),quantidade:Number(p.saldoEstoque||0),venda_dia:0,lead_time:7,estoque_minimo:5,fornecedor:"Olist"}));
+        if(itens.length===0){setErro("Nenhum produto encontrado. Verifique o token e se há produtos ativos no Olist.");setLoading(false);setMsg("");return;}
+        setProdutos(itens);setSelProd(itens.map((_,i)=>i));setStep("produtos");setMsg(itens.length+" produtos encontrados.");
+      }else{
+        const err=await res.json().catch(()=>({}));
+        setErro("Erro ao buscar produtos: "+(err.error||res.status));
+      }
+    }catch(e){
+      setErro("Erro de conexão: "+e.message+". Verifique se o token está correto.");
+    }
+    setLoading(false);
+  };
+
+  const buscarVendas=async()=>{
+    if(!token||!empresaId)return;
+    setLoading(true);setErro("");setMsg("Buscando pedidos no Olist...");
+    try{
+      const params=new URLSearchParams({limit:100,orderBy:"desc",dataInicial:dataIni,dataFinal:dataFim});
+      const olistUrl="https://api.tiny.com.br/api2/pedidos.pesquisa.php?token="+token+"&formato=json&dataInicial="+dataIni+"&dataFinal="+dataFim;
+      const proxyUrl="https://corsproxy.io/?"+encodeURIComponent(olistUrl);
+      const res=await fetch(proxyUrl);
+      if(res.ok){
+        const data=await res.json();
+        if(data?.retorno?.status==="Erro"){
+          const msg=data?.retorno?.erros?.[0]?.erro||"Erro";
+          setErro("Olist retornou erro: "+msg);setLoading(false);setMsg("");return;
+        }
+        const rawPedidos=data?.retorno?.pedidos||[];
+        const itens=rawPedidos.map(p=>{
+          const pd=p.pedido||p;
+          return{
+            numeroPedido:pd.numero||pd.id||"",
+            dataCriacao:pd.data_pedido||pd.dataPedido||dataFim,
+            situacao:pd.situacao||pd.status||"",
+            cliente:{nome:pd.nome_contato||pd.cliente?.nome||"Cliente"},
+            valor:pd.valor||pd.total_pedido||"0",
+            ecommerce:{canalVenda:pd.forma_envio||pd.canal||"Olist"}
+          };
+        });
+        setPedidos(itens);setSelPed(itens.map((_,i)=>i));setStep("vendas");
+        setMsg(itens.length+" pedidos encontrados.");
+      }else{
+        setErro("Erro ao buscar pedidos: "+res.status);
+      }
+    }catch(e){
+      setErro("Erro de conexão: "+e.message);
+    }
+    setLoading(false);
+  };
+
+  const importarProdutos=async()=>{
+    if(!empresaId)return;
+    setLoading(true);setMsg("Importando produtos...");
+    const logs=[];
+    for(const i of selProd){const p=produtos[i];try{await DB.saveEstoque({...p,empresa_id:empresaId});logs.push("✅ "+p.nome+" ("+( p.sku||"sem SKU")+")");}catch{logs.push("❌ Erro: "+p.nome);}}
+    setImportLog(logs);setLoading(false);setMsg(selProd.length+" produto(s) importados!");setStep("done");
+  };
+
+  const importarVendas=async()=>{
+    if(!empresaId)return;
+    setLoading(true);setMsg("Importando pedidos...");
+    const logs=[];
+    const existentes=await DB.receber(empresaId);
+    const pedidosExist=new Set(existentes.map(c=>c.pedido).filter(Boolean));
+    for(const i of selPed){
+      const p=pedidos[i];const numPed="#"+p.numeroPedido;
+      if(pedidosExist.has(numPed)){logs.push("⏭️ Já importado: "+numPed);continue;}
+      const dt=new Date(p.dataCriacao||Date.now());dt.setDate(dt.getDate()+30);
+      const status=p.situacao===6?"Recebido":p.situacao===2?"Cancelado":"Em aberto";
+      try{await DB.saveReceber({empresa_id:empresaId,cliente:p.cliente?.nome||"Cliente Olist",pedido:numPed,vencimento:dt.toISOString().slice(0,10),valor:parseFloat(p.valor||0),status,origem:"Olist · "+(p.ecommerce?.canalVenda||"—")});logs.push("✅ Pedido "+numPed+" — "+(p.cliente?.nome||"Cliente")+" — R$ "+p.valor);}
+      catch{logs.push("❌ Erro no pedido "+numPed);}
+    }
+    setImportLog(logs);setLoading(false);setMsg(selPed.length+" pedido(s) importados!");setStep("done");
+  };
+
+  const tog=(arr,set,i)=>set(prev=>prev.includes(i)?prev.filter(x=>x!==i):[...prev,i]);
+  const selAll=(arr,set)=>set(arr.map((_,i)=>i));
+  const clrAll=(set)=>set([]);
+
+  return(
+    React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:16}},/* HEADER */,React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}},React.createElement('div',{style:{display:"flex",alignItems:"center",gap:12}},React.createElement('div',{style:{width:40,height:40,borderRadius:10,background:"#fff0cc",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}},"🛒"),React.createElement('div',{style:{flex:1}},React.createElement('div',{style:{fontSize:14,fontWeight:700,color:"#111827"}},"Integração Olist ERP"),React.createElement('div',{style:{fontSize:12,color:C.gray}},empresaInfo?.nome?"Empresa: "+empresaInfo.nome:"Selecione uma empresa no menu lateral")),token?React.createElement('span',{style:{fontSize:11,padding:"3px 10px",borderRadius:100,background:C.greenL,color:"#166534",fontWeight:600}},"🔌 Token configurado")
+               :React.createElement('span',{style:{fontSize:11,padding:"3px 10px",borderRadius:100,background:C.amberL,color:"#92400e",fontWeight:600}},"⚠️ Sem token")),msg&&React.createElement('div',{style:{marginTop:10,padding:"8px 12px",background:"#eff6ff",borderRadius:8,fontSize:12,color:C.blueDk}},msg),erro&&React.createElement('div',{style:{marginTop:10,padding:"8px 12px",background:C.redL,borderRadius:8,fontSize:12,color:C.red}},"⚠️",erro)),/* SEM TOKEN */,!token&&(
+        React.createElement('div',{style:{background:C.amberL,border:"1px solid #fde68a",borderRadius:12,padding:16}},React.createElement('div',{style:{fontSize:13,fontWeight:600,color:"#92400e",marginBottom:8}},"⚠️ Token Olist não configurado para",empresaInfo?.nome||"esta empresa"),React.createElement('div',{style:{fontSize:12,color:"#92400e",display:"flex",flexDirection:"column",gap:3}},React.createElement('span',null,"1. Vá em",React.createElement('strong',null,"🏢 Gerenciar empresas"),"no menu"),React.createElement('span',null,"2. Clique em",React.createElement('strong',null,"✏️ Editar"),"na empresa desejada"),React.createElement('span',null,"3. Cole o token Bearer no campo",React.createElement('strong',null,"Token Olist"),"e salve"),React.createElement('span',null,"4. Volte aqui — o token é carregado automaticamente")))
+      ),!empresaId&&React.createElement('div',{style:{background:C.amberL,border:"1px solid #fde68a",borderRadius:12,padding:14,fontSize:12,color:"#92400e"}},"⚠️ Selecione uma empresa específica no menu lateral."),/* PRODUTOS */,React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}},React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:step==="produtos"?14:0}},React.createElement('div',null,React.createElement('div',{style:{fontSize:13,fontWeight:600}},"📦 Importar produtos → Estoque"),React.createElement('div',{style:{fontSize:11,color:C.gray}},"SKU, nome, custo, preço de venda e quantidade")),React.createElement('button',{onClick:buscarProdutos,disabled:loading||!token||!empresaId,style:{...btnP,opacity:!token||!empresaId?.5:1,whiteSpace:"nowrap"}},loading&&step==="produtos"?"Buscando...":"🔍 Buscar produtos")),step==="produtos"&&produtos.length>0&&(
+          React.createElement('div',null,React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}},React.createElement('span',{style:{fontSize:12}},React.createElement('strong',null,produtos.length,"produtos"),"— selecione para importar:"),React.createElement('div',{style:{display:"flex",gap:6}},React.createElement('button',{onClick:()=>selAll(produtos,setSelProd),style:{...btnS,fontSize:11,padding:"4px 10px"}},"Todos"),React.createElement('button',{onClick:()=>clrAll(setSelProd),style:{...btnS,fontSize:11,padding:"4px 10px"}},"Limpar"))),React.createElement('div',{style:{maxHeight:260,overflowY:"auto",border:"1px solid #f3f4f6",borderRadius:8,marginBottom:12}},React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},React.createElement('thead',{style:{position:"sticky",top:0,background:"#f9fafb"}},React.createElement('tr',null,["","SKU","Nome","Custo","Preço Venda","Estoque"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"8px 10px",color:C.gray,fontWeight:500,fontSize:11,borderBottom:"1px solid #e5e7eb"}}>{h}</th>))),React.createElement('tbody',null,produtos.map((p,i)=>{const sel=selProd.includes(i);return(
+                  React.createElement('tr',{key:i,onClick:()=>tog(produtos,setSelProd,i),style:{borderBottom:"1px solid #f3f4f6",background:sel?"#eff6ff":"#fff",cursor:"pointer"}},React.createElement('td',{style:{padding:"8px 10px"}},React.createElement('div',{style:{width:16,height:16,borderRadius:4,border:sel?"none":"1.5px solid #d1d5db",background:sel?C.blue:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}},sel&&<span style={{color:"#fff",fontSize:10}}>✓</span>)),React.createElement('td',{style:{padding:"8px 10px",color:C.gray,fontFamily:"monospace",fontSize:11}},p.sku||"—"),React.createElement('td',{style:{padding:"8px 10px",fontWeight:500,color:"#374151"}},p.nome),React.createElement('td',{style:{padding:"8px 10px",color:C.red,fontWeight:600}},fmtBRL(p.custo)),React.createElement('td',{style:{padding:"8px 10px",color:C.green,fontWeight:600}},fmtBRL(p.preco_venda)),React.createElement('td',{style:{padding:"8px 10px"}},p.quantidade,"un."))
+                );})))),React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between"}},React.createElement('span',{style:{fontSize:12}},React.createElement('strong',null,selProd.length),"selecionados"),React.createElement('button',{onClick:importarProdutos,disabled:loading||selProd.length===0,style:{...btnP,background:C.green,opacity:selProd.length===0?.5:1}},loading?"Importando...":"✅ Importar "+selProd.length+" produto(s)")))
+        )),/* VENDAS */,React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}},React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}},React.createElement('div',null,React.createElement('div',{style:{fontSize:13,fontWeight:600}},"💰 Importar vendas → Contas a Receber"),React.createElement('div',{style:{fontSize:11,color:C.gray}},"Pedidos faturados viram contas a receber no Supabase")),React.createElement('button',{onClick:buscarVendas,disabled:loading||!token||!empresaId,style:{...btnP,opacity:!token||!empresaId?.5:1,whiteSpace:"nowrap"}},loading&&step==="vendas"?"Buscando...":"🔍 Buscar vendas")),React.createElement('div',{style:{display:"flex",gap:10,alignItems:"flex-end",marginBottom:step==="vendas"&&pedidos.length>0?12:0}},React.createElement('div',null,React.createElement('div',{style:{fontSize:11,color:C.gray,marginBottom:4}},"Data inicial"),React.createElement('input',{type:"date",value:dataIni,onChange:e=>setDataIni(e.target.value),style:{...inp,width:145}})),React.createElement('div',null,React.createElement('div',{style:{fontSize:11,color:C.gray,marginBottom:4}},"Data final"),React.createElement('input',{type:"date",value:dataFim,onChange:e=>setDataFim(e.target.value),style:{...inp,width:145}})),step==="vendas"&&React.createElement('button',{onClick:buscarVendas,style:{...btnS,fontSize:12}},"🔄 Atualizar")),step==="vendas"&&pedidos.length>0&&(
+          React.createElement('div',{style:{marginTop:12}},React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}},React.createElement('span',{style:{fontSize:12}},React.createElement('strong',null,pedidos.length,"pedidos"),"encontrados:"),React.createElement('div',{style:{display:"flex",gap:6}},React.createElement('button',{onClick:()=>selAll(pedidos,setSelPed),style:{...btnS,fontSize:11,padding:"4px 10px"}},"Todos"),React.createElement('button',{onClick:()=>clrAll(setSelPed),style:{...btnS,fontSize:11,padding:"4px 10px"}},"Limpar"))),React.createElement('div',{style:{maxHeight:260,overflowY:"auto",border:"1px solid #f3f4f6",borderRadius:8,marginBottom:12}},React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},React.createElement('thead',{style:{position:"sticky",top:0,background:"#f9fafb"}},React.createElement('tr',null,["","Pedido","Data","Cliente","Canal","Valor","Situação"].map((h,i)=><th key={i} style={{textAlign:"left",padding:"8px 10px",color:C.gray,fontWeight:500,fontSize:11,borderBottom:"1px solid #e5e7eb",whiteSpace:"nowrap"}}>{h}</th>))),React.createElement('tbody',null,pedidos.map((p,i)=>{
+                  const sel=selPed.includes(i);const sit=SITUACAO[p.situacao]||"—";const sitColor=p.situacao===6?C.green:p.situacao===2?C.red:C.amber;
+                  return(React.createElement('tr',{key:i,onClick:()=>tog(pedidos,setSelPed,i),style:{borderBottom:"1px solid #f3f4f6",background:sel?"#eff6ff":"#fff",cursor:"pointer"}},React.createElement('td',{style:{padding:"8px 10px"}},React.createElement('div',{style:{width:16,height:16,borderRadius:4,border:sel?"none":"1.5px solid #d1d5db",background:sel?C.blue:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}},sel&&<span style={{color:"#fff",fontSize:10}}>✓</span>)),React.createElement('td',{style:{padding:"8px 10px",color:C.blue,fontWeight:600}},"#",p.numeroPedido),React.createElement('td',{style:{padding:"8px 10px",color:C.gray,whiteSpace:"nowrap"}},p.dataCriacao?.slice(0,10).split("-").reverse().join("/")),React.createElement('td',{style:{padding:"8px 10px",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},p.cliente?.nome||"—"),React.createElement('td',{style:{padding:"8px 10px"}},React.createElement('span',{style:{fontSize:10,padding:"2px 6px",borderRadius:100,background:"#f3f4f6",color:C.gray}},p.ecommerce?.canalVenda||"—")),React.createElement('td',{style:{padding:"8px 10px",fontWeight:600,color:p.situacao===2?C.gray:C.green}},fmtBRL(p.valor)),React.createElement('td',{style:{padding:"8px 10px"}},React.createElement('span',{style:{fontSize:10,padding:"2px 7px",borderRadius:100,background:sitColor+"20",color:sitColor,fontWeight:600}},sit))));
+                })))),React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"space-between"}},React.createElement('div',{style:{fontSize:12}},React.createElement('strong',null,selPed.length),"selecionados · Total:",React.createElement('strong',{style:{color:C.green}},fmtBRL(pedidos.filter((_,i)=>selPed.includes(i)).reduce((s,p)=>s+parseFloat(p.valor||0),0)))),React.createElement('button',{onClick:importarVendas,disabled:loading||selPed.length===0,style:{...btnP,background:C.green,opacity:selPed.length===0?.5:1}},loading?"Importando...":"✅ Importar "+selPed.length+" pedido(s)")))
+        )),/* LOG */,step==="done"&&importLog.length>0&&(
+        React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16}},React.createElement('div',{style:{fontSize:13,fontWeight:600,marginBottom:10}},"📋 Resultado da importação"),React.createElement('div',{style:{maxHeight:200,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}},importLog.map((l,i)=><div key={i} style={{fontSize:12,padding:"4px 8px",borderRadius:6,background:l.startsWith("✅")?"#f0fdf4":l.startsWith("⏭️")?"#f9fafb":"#fff9f9",color:l.startsWith("✅")?"#166534":l.startsWith("⏭️")?C.gray:"#991b1b"}}>{l}</div>)),React.createElement('button',{onClick:()=>{setStep("idle");setProdutos([]);setPedidos([]);setImportLog([]);setMsg("");},style:{...btnS,marginTop:12}},"🔄 Nova importação"))
+      ))
+  );
+}
+const TIPO_CFG={
+  corrente:{label:"Conta Corrente",icon:"🏦",cor:"#2563eb"},
+  poupanca:{label:"Conta Poupança",icon:"💰",cor:"#16a34a"},
+  credito: {label:"Cartão Crédito",icon:"💳",cor:"#7c3aed"},
+  debito:  {label:"Cartão Débito", icon:"💳",cor:"#0891b2"},
+};
+
+
+
+
+
+
+
+
+function AppWrapper(){
+  const[usuario,setUsuario]=useState(null);
+  if(!usuario)returnReact.createElement(Login,{onLogin:setUsuario});
+  returnReact.createElement(App,{usuario:usuario,onLogout:()=>{localStorage.removeItem("fg_user");setUsuario(null);}});
+}
+
+function App({usuario,onLogout}){
+  const[active,setActive]=useState("dashboard");
+  const[empresas,setEmpresas]=useState({});
+  const[empresaAtiva,setEmpresaAtiva]=useState("grupo");
+  const[loadingEmpresas,setLoadingEmpresas]=useState(true);
+
+  const carregarEmpresas=async()=>{
+    const lista=await DB.empresas();
+    const map={};
+    lista.forEach(e=>{map[e.id]={...e,cor:e.cor||C.blue,icon:e.icon||"🏢"};});
+    setEmpresas(map);
+    setLoadingEmpresas(false);
+  };
+  useEffect(()=>{carregarEmpresas();},[]);
+
+  const isGrupo=empresaAtiva==="grupo";
+  const empresaInfo=isGrupo?null:empresas[empresaAtiva];
+  const empresaId=isGrupo?null:empresaAtiva;
+  const grupos=[...new Set(NAV.map(n=>n.group))];
+
+  const panels={
+    dashboard:React.createElement(Dashboard,{empresaId:empresaId,empresas:empresas}),
+    fluxo:React.createElement(FluxoPanel,{empresaId:empresaId}),
+    receber:React.createElement(ContasReceberPanel,{empresaId:empresaId}),
+    pagar:React.createElement(ContasPagarPanel,{empresaId:empresaId}),
+    cartoes:React.createElement(CartoesPanel,{empresaId:empresaId}),
+    estoque:React.createElement(EstoquePanel,{empresaId:empresaId}),
+    devolucoes:React.createElement(DevolucoesPanel,{empresaId:empresaId}),
+    contatos:React.createElement(ContatosPanel,{empresaId:empresaId}),
+    olist:React.createElement(OlistPanel,{empresaId:empresaId,empresaInfo:empresaInfo}),
+    empresas:React.createElement(EmpresasPanel,{onReload:carregarEmpresas}),
+    usuarios:React.createElement(UsuariosPanel,{usuarioAtual:usuario}),
+  };
+
+  const cur=NAV.find(n=>n.id===active);
+
+  if(loadingEmpresas)return(
+    React.createElement('div',{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#1e40af,#7c3aed)"}},React.createElement('div',{style:{textAlign:"center",color:"#fff"}},React.createElement('div',{style:{fontSize:40,marginBottom:10}},"🏦"),React.createElement('div',{style:{fontSize:16,fontWeight:600}},"Carregando FinGroup..."),React.createElement('div',{style:{fontSize:13,opacity:.8,marginTop:4}},"Conectando ao banco de dados")))
+  );
+
+  return(
+    React.createElement('div',{style:{display:"flex",height:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f9fafb"}},/* SIDEBAR */,React.createElement('div',{style:{width:228,background:"#fff",borderRight:"1px solid #e5e7eb",display:"flex",flexDirection:"column",flexShrink:0,overflowY:"auto"}},React.createElement('div',{style:{padding:"14px 16px 10px",borderBottom:"1px solid #f3f4f6"}},React.createElement('div',{style:{fontSize:15,fontWeight:700,color:"#111827"}},"🏦 FinGroup"),React.createElement('div',{style:{fontSize:11,color:"#9ca3af",marginTop:1}},"Gestão financeira")),/* Seletor empresa */,React.createElement('div',{style:{padding:"10px 12px",borderBottom:"1px solid #f3f4f6"}},React.createElement('div',{style:{fontSize:10,color:"#9ca3af",fontWeight:600,textTransform:"uppercase",letterSpacing:.8,marginBottom:6}},"Empresa ativa"),React.createElement('button',{onClick:()=>setEmpresaAtiva("grupo"),style:{width:"100%",padding:"7px 10px",borderRadius:8,border:`1px solid ${isGrupo?C.blue:"#e5e7eb"}`,background:isGrupo?"#eff6ff":"#fff",color:isGrupo?C.blue:"#374151",fontSize:12,fontWeight:isGrupo?700:400,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:6,marginBottom:6}},React.createElement('span',{style:{fontSize:14}},"🌐"),React.createElement('div',null,React.createElement('div',{style:{fontSize:12,lineHeight:1.2}},"Grupo Consolidado"),React.createElement('div',{style:{fontSize:10,opacity:.7}},Object.keys(empresas).length,"empresas"))),Object.values(empresas).map(emp=>{
+            const at=empresaAtiva===emp.id;
+            return(
+              React.createElement('button',{key:emp.id,onClick:()=>setEmpresaAtiva(emp.id),style:{width:"100%",padding:"7px 10px",borderRadius:8,marginBottom:4,border:`1px solid ${at?emp.cor:"#e5e7eb"}`,background:at?emp.cor+"12":"#fff",color:at?emp.cor:"#374151",fontSize:12,fontWeight:at?700:400,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:6}},React.createElement('span',{style:{fontSize:14}},emp.icon),React.createElement('div',null,React.createElement('div',{style:{fontSize:12,lineHeight:1.2}},emp.nome),React.createElement('div',{style:{fontSize:10,opacity:.6}},emp.cnpj||"—")))
+            );
+          })),React.createElement('nav',{style:{flex:1,padding:"8px 0"}},grupos.map(g=>(
+            React.createElement('div',{key:g},React.createElement('div',{style:{padding:"10px 14px 4px",fontSize:10,color:"#9ca3af",fontWeight:600,textTransform:"uppercase",letterSpacing:.8}},g),NAV.filter(n=>n.group===g).map(n=>(
+                React.createElement('button',{key:n.id,onClick:()=>setActive(n.id),style:{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",fontSize:13,width:"100%",textAlign:"left",border:"none",cursor:"pointer",background:active===n.id?"#eff6ff":"transparent",color:active===n.id?C.blue:"#6b7280",fontWeight:active===n.id?600:400,borderLeft:active===n.id?`2px solid ${C.blue}`:"2px solid transparent",transition:"all .12s"}},React.createElement('span',{style:{fontSize:15}},n.icon),n.label)
+              )))
+          ))),/* Info usuário */,React.createElement('div',{style:{padding:"10px 14px",borderTop:"1px solid #f3f4f6",display:"flex",alignItems:"center",gap:8}},React.createElement('div',{style:{width:28,height:28,borderRadius:"50%",background:C.blueL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:C.blueDk,flexShrink:0}},usuario.nome?.[0]?.toUpperCase()),React.createElement('div',{style:{flex:1,minWidth:0}},React.createElement('div',{style:{fontSize:12,fontWeight:600,color:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},usuario.nome),React.createElement('div',{style:{fontSize:10,color:"#9ca3af",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},usuario.email)),React.createElement('button',{onClick:onLogout,title:"Sair",style:{background:"none",border:"none",cursor:"pointer",fontSize:16,color:C.gray}},"🚪"))),/* MAIN */,React.createElement('div',{style:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}},/* TOPBAR */,React.createElement('div',{style:{background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"10px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}},React.createElement('div',{style:{display:"flex",alignItems:"center",gap:10}},empresaInfo&&React.createElement('div',{style:{width:28,height:28,borderRadius:8,background:empresaInfo.cor+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}},empresaInfo.icon),isGrupo&&React.createElement('div',{style:{width:28,height:28,borderRadius:8,background:"#ede9fe",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}},"🌐"),React.createElement('div',null,React.createElement('span',{style:{fontSize:15,fontWeight:700,color:"#111827"}},cur?.icon,cur?.label),React.createElement('span',{style:{marginLeft:8,fontSize:11,padding:"2px 8px",borderRadius:100,background:isGrupo?"#ede9fe":(empresaInfo?.cor+"15"),color:isGrupo?C.purple:empresaInfo?.cor,fontWeight:600}},isGrupo?"🌐 Grupo Consolidado":`${empresaInfo?.icon} ${empresaInfo?.nome}`))),isGrupo&&active!=="dashboard"&&active!=="empresas"&&active!=="usuarios"&&(
+            React.createElement('div',{style:{fontSize:12,color:C.purple,background:"#ede9fe",padding:"6px 14px",borderRadius:8}},"🌐 Modo grupo — selecione uma empresa para editar")
+          )),/* CONTENT */,React.createElement('div',{style:{flex:1,overflowY:"auto",padding:24},key:empresaAtiva+active},panels[active]||React.createElement(Empty,{msg:"Painel em construção"}))))
+  );
+}
+
+const root=ReactDOM.createRoot(document.getElementById("root"));
+root.render(React.createElement(AppWrapper,null));
+
+
+
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(AppWrapper));
+</script>
+</body>
+</html>
